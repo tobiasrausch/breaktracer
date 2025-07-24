@@ -23,14 +23,16 @@
 
 #include "edlib.h"
 #include "util.h"
-//#include "junction.h"
+#include "junction.h"
 
 namespace breaktracer {
 
 
   struct TracerConfig {
-    uint32_t minRefSep;
+    uint16_t minMapQual;
     uint32_t maxReadSep;
+    uint32_t minRefSep;
+    uint32_t minClip;
     int32_t nchr;
     float indelExtension;
     boost::filesystem::path outfile;
@@ -48,6 +50,9 @@ namespace breaktracer {
    ProfilerStart("tracer.prof");
 #endif
 
+   // Search breakpoint insertion traces
+   brInTraces(c);
+   
 #ifdef PROFILE
    ProfilerStop();
 #endif
@@ -74,8 +79,10 @@ namespace breaktracer {
    
    boost::program_options::options_description disc("Discovery options");
    disc.add_options()
-     ("minrefsep,m", boost::program_options::value<uint32_t>(&c.minRefSep)->default_value(30), "min. reference separation")
      ("maxreadsep,n", boost::program_options::value<uint32_t>(&c.maxReadSep)->default_value(100), "max. read separation")
+     ("minrefsep,m", boost::program_options::value<uint32_t>(&c.minRefSep)->default_value(30), "min. reference separation")
+     ("map-qual,q", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(1), "min. mapping quality")
+     ("minclip,c", boost::program_options::value<uint32_t>(&c.minClip)->default_value(25), "min. clipping length")
      ;
 
    boost::program_options::options_description hidden("Hidden options");
