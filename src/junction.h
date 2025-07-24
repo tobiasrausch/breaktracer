@@ -195,6 +195,18 @@ namespace breaktracer
   template<typename TConfig, typename TReadBp>
   inline void
   findL1(TConfig const& c, TReadBp& readBp) {
+    // Open output file
+    std::streambuf * buf;
+    std::ofstream of;
+    if(c.outfile.string() != "-") {
+      of.open(c.outfile.string().c_str());
+      buf = of.rdbuf();
+    } else {
+      buf = std::cout.rdbuf();
+    }
+    std::ostream out(buf);
+    out << "L1InsType\tReadName\tRefCoordBefore\tRefCoordAfter\tL1FragmentSize\tL1Similarity" << std::endl;
+    
     int32_t minSeedAlign = 130;
     int32_t cropSize = 20;  // To cover poly-A tail or micro-insertions at the breakpoint
     int32_t maxFragSize = 7000;
@@ -393,14 +405,14 @@ namespace breaktracer
 		  // Output read
 		  if (validRead) {
 		    int32_t offset = std::abs(readBp[seed][kLow].refpos - readBp[seed][kHigh].refpos);
-		    if (readBp[seed][kLow].refidx != readBp[seed][kHigh].refidx) std::cout << "Inter-chromosomal SV with L1 fragment" << '\t';
-		    else if (offset > 1000) std::cout << "Intra-chromosomal SV with L1 fragment" << '\t';
-		    else std::cout << "L1 insertion" << '\t';
-		    std::cout << bam_get_qname(rec) << '\t';
-		    std::cout << hdr->target_name[readBp[seed][kLow].refidx] << ':' << readBp[seed][kLow].refpos << " (ReadPos: " << readBp[seed][kLow].seqpos << ')' << '\t';
-		    std::cout << hdr->target_name[readBp[seed][kHigh].refidx] << ':' << readBp[seed][kHigh].refpos << " (ReadPos: " << readBp[seed][kHigh].seqpos << ')' << '\t';
-		    std::cout << l1AlignLength << '\t';
-		    std::cout << pid << std::endl;
+		    if (readBp[seed][kLow].refidx != readBp[seed][kHigh].refidx) out << "Inter-chromosomal SV with L1 fragment" << '\t';
+		    else if (offset > 1000) out << "Intra-chromosomal SV with L1 fragment" << '\t';
+		    else out << "L1 insertion" << '\t';
+		    out << bam_get_qname(rec) << '\t';
+		    out << hdr->target_name[readBp[seed][kLow].refidx] << ':' << readBp[seed][kLow].refpos << " (ReadPos: " << readBp[seed][kLow].seqpos << ')' << '\t';
+		    out << hdr->target_name[readBp[seed][kHigh].refidx] << ':' << readBp[seed][kHigh].refpos << " (ReadPos: " << readBp[seed][kHigh].seqpos << ')' << '\t';
+		    out << l1AlignLength << '\t';
+		    out << pid << std::endl;
 		  }
 		}
 	      }
@@ -418,6 +430,9 @@ namespace breaktracer
       hts_idx_destroy(idx[file_c]);
       sam_close(samfile[file_c]);
     }
+
+    // Close file
+    if(c.outfile.string() != "-") of.close();
   }   
   
   template<typename TConfig>
@@ -430,7 +445,6 @@ namespace breaktracer
     findJunctions(c, readBp);
 
     // Line1
-    std::cout << "L1InsType\tReadName\tRefCoordBefore\tRefCoordAfter\tL1FragmentSize\tL1Similarity" << std::endl;
     findL1(c, readBp);    
   }
 
