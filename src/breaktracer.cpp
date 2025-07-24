@@ -14,6 +14,7 @@
 #include <htslib/sam.h>
 
 #include "version.h"
+#include "tracer.h"
 
 using namespace breaktracer;
 
@@ -22,7 +23,7 @@ inline void
 displayUsage() {
   std::cerr << "Usage: breaktracer <command> <arguments>" << std::endl;
   std::cerr << std::endl;
-  std::cerr << "    trace        trace L1 inserted sequence fragment" << std::endl;
+  std::cerr << "    find        trace L1 inserted sequence fragment" << std::endl;
   std::cerr << std::endl;
 }
 
@@ -52,9 +53,8 @@ int main(int argc, char **argv) {
       bsd();
       return 0;
     }
-    else if ((std::string(argv[1]) == "tracer")) {
-      return 0;
-      //return tracer(argc-1,argv+1);
+    else if ((std::string(argv[1]) == "find")) {
+      return tracer(argc-1,argv+1);
     }
     std::cerr << "Unrecognized command " << std::string(argv[1]) << std::endl;
     return 1;
