@@ -23,12 +23,11 @@ namespace breaktracer
     bool forward;
     bool scleft;
     int32_t refidx;
-    int32_t rstart;
     int32_t refpos;
     int32_t seqpos;
     uint16_t qual;
 
-    Junction(bool const fw, bool const cl, int32_t const idx, int32_t const rst, int32_t const r, int32_t const s, uint16_t const qval) : forward(fw), scleft(cl), refidx(idx), rstart(rst), refpos(r), seqpos(s), qual(qval) {}
+    Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval) : forward(fw), scleft(cl), refidx(idx), refpos(r), seqpos(s), qual(qval) {}
 
     bool operator<(const Junction& j2) const {
       return ((seqpos<j2.seqpos) || ((seqpos==j2.seqpos) && (refidx<j2.refidx)) || ((seqpos==j2.seqpos) && (refidx==j2.refidx) && (refpos<j2.refpos)) || ((seqpos==j2.seqpos) && (refidx==j2.refidx) && (refpos==j2.refpos) && (scleft < j2.scleft)));
@@ -41,30 +40,20 @@ namespace breaktracer
     _insertJunction(TReadBp& readBp, std::size_t const seed, bam1_t* rec, int32_t const rp, int32_t const sp, bool const scleft) {
     bool fw = true;
     if (rec->core.flag & BAM_FREVERSE) fw = false;
-    int32_t readStart = rec->core.pos;
-    if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) readStart = -1;
     typedef typename TReadBp::mapped_type TJunctionVector;
     typename TReadBp::iterator it = readBp.find(seed);
     int32_t seqlen = readLength(rec);
     if (sp <= seqlen) {
       if (rec->core.flag & BAM_FREVERSE) {
-	if (it != readBp.end()) it->second.push_back(Junction(fw, scleft, rec->core.tid, readStart, rp, seqlen - sp, rec->core.qual));
-	else readBp.insert(std::make_pair(seed, TJunctionVector(1, Junction(fw, scleft, rec->core.tid, readStart, rp, seqlen - sp, rec->core.qual))));
+	if (it != readBp.end()) it->second.push_back(Junction(fw, scleft, rec->core.tid, rp, seqlen - sp, rec->core.qual));
+	else readBp.insert(std::make_pair(seed, TJunctionVector(1, Junction(fw, scleft, rec->core.tid, rp, seqlen - sp, rec->core.qual))));
       } else {
-	if (it != readBp.end()) it->second.push_back(Junction(fw, scleft, rec->core.tid, readStart, rp, sp, rec->core.qual));
-	else readBp.insert(std::make_pair(seed, TJunctionVector(1, Junction(fw, scleft, rec->core.tid, readStart, rp, sp, rec->core.qual))));
+	if (it != readBp.end()) it->second.push_back(Junction(fw, scleft, rec->core.tid, rp, sp, rec->core.qual));
+	else readBp.insert(std::make_pair(seed, TJunctionVector(1, Junction(fw, scleft, rec->core.tid, rp, sp, rec->core.qual))));
       }
     }
   }
 
-  inline int32_t
-  _selectReadStart(std::vector<Junction> const& jcvec) {
-    for(uint32_t i = 0; i < jcvec.size(); ++i) {
-      if (jcvec[i].rstart != -1) return jcvec[i].rstart;
-    }
-    return -1;
-  }  
-  
   template<typename TConfig, typename TReadBp>
   inline void
   findJunctions(TConfig const& c, TReadBp& readBp) {
@@ -90,106 +79,104 @@ namespace breaktracer
       // Collect reads from all samples
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
 	// Read alignments
-	for(int32_t refIndex = 0; refIndex < c.nchr; ++refIndex) {
-	  hts_itr_t* iter = sam_itr_queryi(idx[file_c], refIndex, 0, hdr->target_len[refIndex]);
-	  bam1_t* rec = bam_init1();
-	  while (sam_itr_next(samfile[file_c], iter, rec) >= 0) {
+	hts_itr_t* iter = sam_itr_queryi(idx[file_c], refIndex, 0, hdr->target_len[refIndex]);
+	bam1_t* rec = bam_init1();
+	while (sam_itr_next(samfile[file_c], iter, rec) >= 0) {
 
-	    // Keep secondary alignments
-	    if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
-	    if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
-
-	    std::size_t seed = hash_lr(rec);
-	    //std::cerr << bam_get_qname(rec) << '\t' << seed << std::endl;
-	    uint32_t rp = rec->core.pos; // reference pointer
-	    uint32_t sp = 0; // sequence pointer
-	    
-	    // Parse the CIGAR
-	    const uint32_t* cigar = bam_get_cigar(rec);
-	    for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
-	      if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
-		sp += bam_cigar_oplen(cigar[i]);
-		rp += bam_cigar_oplen(cigar[i]);
-	      } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
-		if (bam_cigar_oplen(cigar[i]) > c.minRefSep) _insertJunction(readBp, seed, rec, rp, sp, false);
-		rp += bam_cigar_oplen(cigar[i]);
-		if (bam_cigar_oplen(cigar[i]) > c.minRefSep) { // Try look-ahead
-		  uint32_t spOrig = sp;
-		  uint32_t rpTmp = rp;
-		  uint32_t spTmp = sp;
-		  uint32_t dlen = bam_cigar_oplen(cigar[i]);
-		  for (std::size_t j = i + 1; j < rec->core.n_cigar; ++j) {
-		    if ((bam_cigar_op(cigar[j]) == BAM_CMATCH) || (bam_cigar_op(cigar[j]) == BAM_CEQUAL) || (bam_cigar_op(cigar[j]) == BAM_CDIFF)) {
-		      spTmp += bam_cigar_oplen(cigar[j]);
-		      rpTmp += bam_cigar_oplen(cigar[j]);
-		      if ((double) (spTmp - sp) / (double) (dlen + (rpTmp - rp)) > c.indelExtension) break;
-		    } else if (bam_cigar_op(cigar[j]) == BAM_CDEL) {
-		      rpTmp += bam_cigar_oplen(cigar[j]);
-		      if (bam_cigar_oplen(cigar[j]) > c.minRefSep) {
-			// Extend deletion
-			dlen += (rpTmp - rp);
-			rp = rpTmp;
-			sp = spTmp;
-			i = j;
-		      }
-		    } else if (bam_cigar_op(cigar[j]) == BAM_CINS) {
-		      if (bam_cigar_oplen(cigar[j]) > c.minRefSep) break; // No extension
-		      spTmp += bam_cigar_oplen(cigar[j]);
-		    } else break; // No extension
-		  }
-		  _insertJunction(readBp, seed, rec, rp, spOrig, true);
-		}
-	      } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
-		if (bam_cigar_oplen(cigar[i]) > c.minRefSep) _insertJunction(readBp, seed, rec, rp, sp, false);
-		sp += bam_cigar_oplen(cigar[i]);
-		if (bam_cigar_oplen(cigar[i]) > c.minRefSep) { // Try look-ahead
-		  uint32_t rpOrig = rp;
-		  uint32_t rpTmp = rp;
-		  uint32_t spTmp = sp;
-		  uint32_t ilen = bam_cigar_oplen(cigar[i]);
-		  for (std::size_t j = i + 1; j < rec->core.n_cigar; ++j) {
-		    if ((bam_cigar_op(cigar[j]) == BAM_CMATCH) || (bam_cigar_op(cigar[j]) == BAM_CEQUAL) || (bam_cigar_op(cigar[j]) == BAM_CDIFF)) {
-		      spTmp += bam_cigar_oplen(cigar[j]);
-		      rpTmp += bam_cigar_oplen(cigar[j]);
-		      if ((double) (rpTmp - rp) / (double) (ilen + (spTmp - sp)) > c.indelExtension) break;
-		    } else if (bam_cigar_op(cigar[j]) == BAM_CDEL) {
-		      if (bam_cigar_oplen(cigar[j]) > c.minRefSep) break; // No extension
-		      rpTmp += bam_cigar_oplen(cigar[j]);
-		    } else if (bam_cigar_op(cigar[j]) == BAM_CINS) {
-		      spTmp += bam_cigar_oplen(cigar[j]);
-		      if (bam_cigar_oplen(cigar[j]) > c.minRefSep) {
-			// Extend insertion
-			ilen += (spTmp - sp);
-			rp = rpTmp;
-			sp = spTmp;
-			i = j;
-		      }
-		    } else {
-		      break; // No extension
+	  // Keep secondary alignments
+	  if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP)) continue;
+	  if ((rec->core.qual < c.minMapQual) || (rec->core.tid<0)) continue;
+	  
+	  std::size_t seed = hash_lr(rec);
+	  //std::cerr << bam_get_qname(rec) << '\t' << seed << std::endl;
+	  uint32_t rp = rec->core.pos; // reference pointer
+	  uint32_t sp = 0; // sequence pointer
+	  
+	  // Parse the CIGAR
+	  const uint32_t* cigar = bam_get_cigar(rec);
+	  for (std::size_t i = 0; i < rec->core.n_cigar; ++i) {
+	    if ((bam_cigar_op(cigar[i]) == BAM_CMATCH) || (bam_cigar_op(cigar[i]) == BAM_CEQUAL) || (bam_cigar_op(cigar[i]) == BAM_CDIFF)) {
+	      sp += bam_cigar_oplen(cigar[i]);
+	      rp += bam_cigar_oplen(cigar[i]);
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
+	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) _insertJunction(readBp, seed, rec, rp, sp, false);
+	      rp += bam_cigar_oplen(cigar[i]);
+	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) { // Try look-ahead
+		uint32_t spOrig = sp;
+		uint32_t rpTmp = rp;
+		uint32_t spTmp = sp;
+		uint32_t dlen = bam_cigar_oplen(cigar[i]);
+		for (std::size_t j = i + 1; j < rec->core.n_cigar; ++j) {
+		  if ((bam_cigar_op(cigar[j]) == BAM_CMATCH) || (bam_cigar_op(cigar[j]) == BAM_CEQUAL) || (bam_cigar_op(cigar[j]) == BAM_CDIFF)) {
+		    spTmp += bam_cigar_oplen(cigar[j]);
+		    rpTmp += bam_cigar_oplen(cigar[j]);
+		    if ((double) (spTmp - sp) / (double) (dlen + (rpTmp - rp)) > c.indelExtension) break;
+		  } else if (bam_cigar_op(cigar[j]) == BAM_CDEL) {
+		    rpTmp += bam_cigar_oplen(cigar[j]);
+		    if (bam_cigar_oplen(cigar[j]) > c.minRefSep) {
+		      // Extend deletion
+		      dlen += (rpTmp - rp);
+		      rp = rpTmp;
+		      sp = spTmp;
+		      i = j;
 		    }
-		  }
-		  _insertJunction(readBp, seed, rec, rpOrig, sp, true);
+		  } else if (bam_cigar_op(cigar[j]) == BAM_CINS) {
+		    if (bam_cigar_oplen(cigar[j]) > c.minRefSep) break; // No extension
+		    spTmp += bam_cigar_oplen(cigar[j]);
+		  } else break; // No extension
 		}
-	      } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
-		rp += bam_cigar_oplen(cigar[i]);
-	      } else if ((bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) {
-		int32_t finalsp = sp;
-		bool scleft = false;
-		if (sp == 0) {
-		  finalsp += bam_cigar_oplen(cigar[i]); // Leading soft-clip / hard-clip
-		  scleft = true;
-		}
-		sp += bam_cigar_oplen(cigar[i]);
-		//std::cerr << bam_get_qname(rec) << ',' << rp << ',' << finalsp << ',' << scleft << std::endl;
-		if (bam_cigar_oplen(cigar[i]) > c.minClip) _insertJunction(readBp, seed, rec, rp, finalsp, scleft);
-	      } else {
-		std::cerr << "Unknown Cigar options" << std::endl;
+		_insertJunction(readBp, seed, rec, rp, spOrig, true);
 	      }
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
+	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) _insertJunction(readBp, seed, rec, rp, sp, false);
+	      sp += bam_cigar_oplen(cigar[i]);
+	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) { // Try look-ahead
+		uint32_t rpOrig = rp;
+		uint32_t rpTmp = rp;
+		uint32_t spTmp = sp;
+		uint32_t ilen = bam_cigar_oplen(cigar[i]);
+		for (std::size_t j = i + 1; j < rec->core.n_cigar; ++j) {
+		  if ((bam_cigar_op(cigar[j]) == BAM_CMATCH) || (bam_cigar_op(cigar[j]) == BAM_CEQUAL) || (bam_cigar_op(cigar[j]) == BAM_CDIFF)) {
+		    spTmp += bam_cigar_oplen(cigar[j]);
+		    rpTmp += bam_cigar_oplen(cigar[j]);
+		    if ((double) (rpTmp - rp) / (double) (ilen + (spTmp - sp)) > c.indelExtension) break;
+		  } else if (bam_cigar_op(cigar[j]) == BAM_CDEL) {
+		    if (bam_cigar_oplen(cigar[j]) > c.minRefSep) break; // No extension
+		    rpTmp += bam_cigar_oplen(cigar[j]);
+		  } else if (bam_cigar_op(cigar[j]) == BAM_CINS) {
+		    spTmp += bam_cigar_oplen(cigar[j]);
+		    if (bam_cigar_oplen(cigar[j]) > c.minRefSep) {
+		      // Extend insertion
+		      ilen += (spTmp - sp);
+		      rp = rpTmp;
+		      sp = spTmp;
+		      i = j;
+		    }
+		  } else {
+		    break; // No extension
+		  }
+		}
+		_insertJunction(readBp, seed, rec, rpOrig, sp, true);
+	      }
+	    } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
+	      rp += bam_cigar_oplen(cigar[i]);
+	    } else if ((bam_cigar_op(cigar[i]) == BAM_CSOFT_CLIP) || (bam_cigar_op(cigar[i]) == BAM_CHARD_CLIP)) {
+	      int32_t finalsp = sp;
+	      bool scleft = false;
+	      if (sp == 0) {
+		finalsp += bam_cigar_oplen(cigar[i]); // Leading soft-clip / hard-clip
+		scleft = true;
+	      }
+	      sp += bam_cigar_oplen(cigar[i]);
+	      //std::cerr << bam_get_qname(rec) << ',' << rp << ',' << finalsp << ',' << scleft << std::endl;
+	      if (bam_cigar_oplen(cigar[i]) > c.minClip) _insertJunction(readBp, seed, rec, rp, finalsp, scleft);
+	    } else {
+	      std::cerr << "Unknown Cigar options" << std::endl;
 	    }
 	  }
-	  bam_destroy1(rec);
-	  hts_itr_destroy(iter);
 	}
+	bam_destroy1(rec);
+	hts_itr_destroy(iter);
       }
     }
 
@@ -208,7 +195,6 @@ namespace breaktracer
   template<typename TConfig, typename TReadBp>
   inline void
   findL1(TConfig const& c, TReadBp& readBp) {
-    std::string line1("GGGGGAGGAGCCAAGATGGCCGAATAGGAACAGCTCCGGTCTACAGCTCCCAGCGTGAGCGACGCAGAAGACGGTGATTTCTGCATTTCCATCTGAGGTACCGGGTTCATCTCACTAGGGAGTGCCAGACAGTGGGCGCAGGCCAGTGTGTGTGCGCACCGTGCGCGAGCCGAAGCAGGGCGAGGCATTGCCTCACCTGGGAAGCGCAAGGGGTCAGGGAGTTCCCTTTCTGAGTCAAAGAAAGGGGTGACGGTCGCACCTGGAAAATCGGGTCACTCCCACCCGAATATTGCGCTTTTCAGACCGGCTTAAGAAACGGCGCACCACGAGACTATATCCCACACCTGGCTCGGAGGGTCCTACGCCCACGGAATCTCGCTGATTGCTAGCACAGCAGTCTGAGATCAAACTGCAAGGCGGCAACGAGGCTGGGGGAGGGGCGCCCGCCATTGCCCAGGCTTGCTTAGGTAAACAAAGCAGCCGGGAAGCTCGAACTGGGTGGAGCCCACCACAGCTCAAGGAGGCCTGCCTGCCTCTGTAGGCTCCACCTCTGGGGGCAGGGCACAGACAAACAAAAAGACAGCAGTAACCTCTGCAGACTTAAGTGTCCCTGTCTGACAGCTTTGAAGAGAGCAGTGGTTCTCCCAGCACGCAGCTGGAGATCTGAGAACGGGCAGACAGACTGCCTCCTCAAGTGGGTCCCTGACTCCTGACCCCCGAGCAGCCTAACTGGGAGGCACCCCCCAGCAGGGGCACACTGACACCTCACACGGCAGGGTATTCCAACAGACCTGCAGCTGAGGGTCCTGTCTGTTAGAAGGAAAACTAACAACCAGAAAGGACATCTACACCGAAAACCCATCTGTACATCACCATCATCAAAGACCAAAAGTAGATAAAACCACAAAGATGGGGAAAAAACAGAACAGAAAAACTGGAAACTCTAAAACGCAGAGCGCCTCTCCTCCTCCAAAGGAACGCAGTTCCTCACCAGCAACGGAACAAAGCTGGATGGAGAATGATTTTGACGAGCTGAGAGAAGAAGGCTTCAGACGATCAAATTACTCTGAGCTACGGGAGGACATTCAAACCAAAGGCAAAGAAGTTGAAAACTTTGAAAAAAATTTAGAAGAATGTATAACTAGAATAACCAATACAGAGAAGTGCTTAAAGGAGCTGATGGAGCTGAAAACCAAGGCTCGAGAACTACGTGAAGAATGCAGAAGCCTCAGGAGCCGATGCGATCAACTGGAAGAAAGGGTATCAGCAATGGAAGATGAAATGAATGAAATGAAGCGAGAAGGGAAGTTTAGAGAAAAAAGAATAAAAAGAAATGAGCAAAGCCTCCAAGAAATATGGGACTATGTGAAAAGACCAAATCTACGTCTGATTGGTGTACCTGAAAGTGATGTGGAGAATGGAACCAAGTTGGAAAACACTCTGCAGGATATTATCCAGGAGAACTTCCCCAATCTAGCAAGGCAGGCCAACGTTCAGATTCAGGAAATACAGAGAACGCCACAAAGATACTCCTCGAGAAGAGCAACTCCAAGACACATAATTGTCAGATTCACCAAAGTTGAAATGAAGGAAAAAATGTTAAGGGCAGCCAGAGAGAAAGGTCGGGTTACCCTCAAAGGAAAGCCCATCAGACTAACAGTGGATCTCTCGGCAGAAACCCTACAAGCCAGAAGAGAGTGGGGGCCAATATTCAACATTCTTAAAGAAAAGAATTTTCAACCCAGAATTTCATATCCAGCCAAACTAAGCTTCATAAGTGAAGGAGAAATAAAATACTTTATAGACAAGCAAATGTTGAGAGATTTTGTCACCACCAGGCCTGCCCTAAAAGAGCTCCTGAAGGAAGCGCTAAACATGGAAAGGAACAACCGGTACCAGCCGCTGCAAAATCATGCCAAAATGTAAAGACCATCGAGACTAGGAAGAAACTGCATCAACTAATGAGCAAAATCACCAGCTAACATCATAATGACAGGATCAAATTCACACATAACAATATTAACTTTAAATATAAATGGACTAAATTCTGCAATTAAAAGACACAGACTGGCAAGTTGGATAAAGAGTCAAGACCCATCAGTGTGCTGTATTCAGGAAACCCATCTCACGTGCAGAGACACACATAGGCTCAAAATAAAAGGATGGAGGAAGATCTACCAAGCCAATGGAAAACAAAAAAAGGCAGGGGTTGCAATCCTAGTCTCTGATAAAACAGACTTTAAACCAACAAAGATCAAAAGAGACAAAGAAGGCCATTACATAATGGTAAAGGGATCAATTCAACAAGAGGAGCTAACTATCCTAAATATTTATGCACCCAATACAGGAGCACCCAGATTCATAAAGCAAGTCCTCAGTGACCTACAAAGAGACTTAGACTCCCACACATTAATAATGGGAGACTTTAACACCCCACTGTCAACATTAGACAGATCAACGAGACAGAAAGTCAACAAGGATACCCAGGAATTGAACTCAGCTCTGCACCAAGCAGACCTAATAGACATCTACAGAACTCTCCACCCCAAATCAACAGAATATACCTTTTTTTCAGCACCACACCACACCTATTCCAAAATTGACCACATAGTTGGAAGTAAAGCTCTCCTCAGCAAATGTAAAAGAACAGAAATTATAACAAACTATCTCTCAGACCACAGTGCAATCAAACTAGAACTCAGGATTAAGAATCTCACTCAAAGCCGCTCAACTACATGGAAACTGAACAACCTGCTCCTGAATGACTACTGGGTACATAACGAAATGAAGGCAGAAATAAAGATGTTCTTTGAAACCAACGAGAACAAAGACACCACATACCAGAATCTCTGGGACGCATTCAAAGCAGTGTGTAGAGGGAAATTTATAGCACTAAATGCCTACAAGAGAAAGCAGGAAAGATCCAAAATTGACACCCTAACATCACAATTAAAAGAACTAGAAAAGCAAGAGCAAACACATTCAAAAGCTAGCAGAAGGCAAGAAATAACTAAAATCAGAGCAGAACTGAAGGAAATAGAGACACAAAAAACCCTTCAAAAAATCAATGAATCCAGGAGCTGGTTTTTTGAAAGGATCAACAAAATTGATAGACCGCTAGCAAGACTAATAAAGAAAAAAAGAGAGAAGAATCAAATAGACACAATAAAAAATGATAAAGGGGATATCACCACCGATCCCACAGAAATACAAACTACCATCAGAGAATACTACAAACACCTCTACGCAAATAAACTAGAAAATCTAGAAGAAATGGATACATTCCTCGACACATACACTCTCCCAAGACTAAACCAGGAAGAAGTTGAATCTCTGAATAGACCAATAACAGGCTCTGAAATTGTGGCAATAATCAATAGTTTACCAACCAAAAAGAGTCCAGGACCAGATGGATTCACAGCCGAATTCTACCAGAGGTACATGGAGGAACTGGTACCATTCCTTCTGAAACTATTCCAATCAATAGAAAAAGAGGGAATCCTCCCTAACTCATTTTATGAGGCCAGCATCATTCTGATACCAAAGCCGGGCAGAGACACAACCAAAAAAGAGAATTTTAGACCAATATCCTTGATGAACATTGATGCAAAAATCCTCAATAAAATACTGGCAAACCGAATCCAGCAGCACATCAAAAAGCTTATCCACCATGATCAAGTGGGCTTCATCCCTGGGATGCAAGGCTGGTTCAATATACGCAAATCAATAAATGTAATCCAGCATATAAACAGAGCCAAAGACAAAAACCACATGATTATCTCAATAGATGCAGAAAAAGCCTTTGACAAAATTCAACAACCCTTCATGCTAAAAACTCTCAATAAATTAGGTATTGATGGGACGTATTTCAAAATAATAAGAGCTATCTATGACAAACCCACAGCCAATATCATACTGAATGGGCAAAAACTGGAAGCATTCCCTTTGAAAACCGGCACAAGACAGGGATGCCCTCTCTCACCGCTCCTATTCAACATAGTGTTGGAAGTTCTGGCCAGGGCAATCAGGCAGGAGAAGGAAATAAAGGGTATTCAATTAGGAAAAGAGGAAGTCAAATTGTCCCTGTTTGCAGACGACATGATTGTATATCTAGAAAACCCCATCGTCTCAGCCCAAAATCTCCTTAAGCTGATAAGCAACTTCAGCAAAGTCTCAGGATACAAAATCAATGTACAAAAATCACAAGCATTCTTATACACCAACAACAGACAAACAGAGAGCCAAATCATGGGTGAACTCCCATTCGTAATTGCTTCAAAGAGAATAAAATACCTAGGAATCCAACTTACAAGGGATGTGAAGGACCTCTTCAAGGAGAACTACAAACCACTGCTCAAGGAAATAAAAGAGGACACAAACAAATGGAAGAACATTCCATGCTCATGGGTAGGAAGAATCAATATCGTGAAAATGGCCATACTGCCCAAGGTAATTTACAGATTCAATGCCATCCCCATCAAGCTACCAATGACTTTCTTCACAGAATTGGAAAAAACTACTTTAAAGTTCATATGGAACCAAAAAAGAGCCCGCATTGCCAAGTCAATCCTAAGCCAAAAGAACAAAGCTGGAGGCATCACACTACCTGACTTCAAACTATACTACAAGGCTACAGTAACCAAAACAGCATGGTACTGGTACCAAAACAGAGATATAGATCAATGGAACAGAACAGAGCCCTCAGAAATAATGCCGCATATCTACAACTATCTGATCTTTGACAAACCTGAGAAAAACAAGCAATGGGGAAAGGATTCCCTATTTAATAAATGGTGCTGGGAAAACTGGCTAGCCATATGTAGAAAGCTGAAACTGGATCCCTTCCTTACACCTTATACAAAAATCAATTCAAGATGGATTAAAGATTTAAACGTTAAACCTAAAACCATAAAAACCCTAGAAGAAAACCTAGGCATTACCATTCAGGACATAGGCGTGGGCAAGGACTTCATGTCCAAAACACCAAAAGCAATGGCAACAAAAGACAAAATTGACAAATGGGATCTAATTAAACTAAAGAGCTTCTGCACAGCAAAAGAAACTACCATCAGAGTGAACAGGCAACCTACAACATGGGAGAAAATTTTCGCAACCTACTCATCTGACAAAGGGCTAATATCCAGAATCTACAATGAACTTAAACAAATTTACAAGAAAAAAACAAACAACCCCATCAAAAAGTGGGCGAAGGACATGAACAGACACTTCTCAAAAGAAGACATTTATGCAGCCAAAAAACACATGAAGAAATGCTCATCATCACTGGCCATCAGAGAAATGCAAATCAAAACCACTATGAGATATCATCTCACACCAGTTAGAATGGCAATCATTAAAAAGTCAGGAAACAACAGGTGCTGGAGAGGATGCGGAGAAATAGGAACACTTTTACACTGTTGGTGGGACTGTAAACTAGTTCAACCATTGTGGAAGTCAGTGTGGCGATTCCTCAGGGATCTAGAACTAGAAATACCATTTGACCCAGCCATCCCATTACTGGGTATATACCCAAATGAGTATAAATCATGCTGCTATAAAGACACATGCACACGTATGTTTATTGCGGCACTATTCACAATAGCAAAGACTTGGAACCAACCCAAATGTCCAACAATGATAGACTGGATTAAGAAAATGTGGCACATATACACCATGGAATACTATGCAGCCATAAAAAATGATGAGTTCATATCCTTTGTAGGGACATGGATGAAATTGGAAACCATCATTCTCAGTAAACTATCGCAAGAACAAAAAACCAAACACCGCATATTCTCACTCATAGGTGGGAATTGAACAATGAGATCACATGGACACAGGAAGGGGAATATCACACTCTGGGGACTGTGGTGGGGTCGGGGGAGGGGGGAGGGATAGCATTGGGAGATATACCTAATGCTAGATGACACATTAGTGGGTGCAGCGCACCAGCATGGCACATGTATACATATGTAACTAACCTGCACAATGTGCACATGTACCCTAAAACTTAGAGTATATACTCTAAGTTTTAGGGTACATGTGCACATTGTGCAGGTTAGTTACATATGTATACATGTGCCATGCTGGTGCGCTGCACCCACTAATGTGTCATCTAGCATTAGGTATATCTCCCAATGCTATCCCTCCCCCCTCCCCCGACCCCACCACAGTCCCCAGAGTGTGATATTCCCCTTCCTGTGTCCATGTGATCTCATTGTTCAATTCCCACCTATGAGTGAGAATATGCGGTGTTTGGTTTTTTGTTCTTGCGATAGTTTACTGAGAATGATGGTTTCCAATTTCATCCATGTCCCTACAAAGGATATGAACTCATCATTTTTTATGGCTGCATAGTATTCCATGGTGTATATGTGCCACATTTTCTTAATCCAGTCTATCATTGTTGGACATTTGGGTTGGTTCCAAGTCTTTGCTATTGTGAATAGTGCCGCAATAAACATACGTGTGCATGTGTCTTTATAGCAGCATGATTTATACTCATTTGGGTATATACCCAGTAATGGGATGGCTGGGTCAAATGGTATTTCTAGTTCTAGATCCCTGAGGAATCGCCACACTGACTTCCACAATGGTTGAACTAGTTTACAGTCCCACCAACAGTGTAAAAGTGTTCCTATTTCTCCGCATCCTCTCCAGCACCTGTTGTTTCCTGACTTTTTAATGATTGCCATTCTAACTGGTGTGAGATGATATCTCATAGTGGTTTTGATTTGCATTTCTCTGATGGCCAGTGATGATGAGCATTTCTTCATGTGTTTTTTGGCTGCATAAATGTCTTCTTTTGAGAAGTGTCTGTTCATGTCCTTCGCCCACTTTTTGATGGGGTTGTTTGTTTTTTTCTTGTAAATTTGTTTAAGTTCATTGTAGATTCTGGATATTAGCCCTTTGTCAGATGAGTAGGTTGCGAAAATTTTCTCCCATGTTGTAGGTTGCCTGTTCACTCTGATGGTAGTTTCTTTTGCTGTGCAGAAGCTCTTTAGTTTAATTAGATCCCATTTGTCAATTTTGTCTTTTGTTGCCATTGCTTTTGGTGTTTTGGACATGAAGTCCTTGCCCACGCCTATGTCCTGAATGGTAATGCCTAGGTTTTCTTCTAGGGTTTTTATGGTTTTAGGTTTAACGTTTAAATCTTTAATCCATCTTGAATTGATTTTTGTATAAGGTGTAAGGAAGGGATCCAGTTTCAGCTTTCTACATATGGCTAGCCAGTTTTCCCAGCACCATTTATTAAATAGGGAATCCTTTCCCCATTGCTTGTTTTTCTCAGGTTTGTCAAAGATCAGATAGTTGTAGATATGCGGCATTATTTCTGAGGGCTCTGTTCTGTTCCATTGATCTATATCTCTGTTTTGGTACCAGTACCATGCTGTTTTGGTTACTGTAGCCTTGTAGTATAGTTTGAAGTCAGGTAGTGTGATGCCTCCAGCTTTGTTCTTTTGGCTTAGGATTGACTTGGCAATGCGGGCTCTTTTTTGGTTCCATATGAACTTTAAAGTAGTTTTTTCCAATTCTGTGAAGAAAGTCATTGGTAGCTTGATGGGGATGGCATTGAATCTGTAAATTACCTTGGGCAGTATGGCCATTTTCACGATATTGATTCTTCCTACCCATGAGCATGGAATGTTCTTCCATTTGTTTGTGTCCTCTTTTATTTCCTTGAGCAGTGGTTTGTAGTTCTCCTTGAAGAGGTCCTTCACATCCCTTGTAAGTTGGATTCCTAGGTATTTTATTCTCTTTGAAGCAATTACGAATGGGAGTTCACCCATGATTTGGCTCTCTGTTTGTCTGTTGTTGGTGTATAAGAATGCTTGTGATTTTTGTACATTGATTTTGTATCCTGAGACTTTGCTGAAGTTGCTTATCAGCTTAAGGAGATTTTGGGCTGAGACGATGGGGTTTTCTAGATATACAATCATGTCGTCTGCAAACAGGGACAATTTGACTTCCTCTTTTCCTAATTGAATACCCTTTATTTCCTTCTCCTGCCTGATTGCCCTGGCCAGAACTTCCAACACTATGTTGAATAGGAGCGGTGAGAGAGGGCATCCCTGTCTTGTGCCGGTTTTCAAAGGGAATGCTTCCAGTTTTTGCCCATTCAGTATGATATTGGCTGTGGGTTTGTCATAGATAGCTCTTATTATTTTGAAATACGTCCCATCAATACCTAATTTATTGAGAGTTTTTAGCATGAAGGGTTGTTGAATTTTGTCAAAGGCTTTTTCTGCATCTATTGAGATAATCATGTGGTTTTTGTCTTTGGCTCTGTTTATATGCTGGATTACATTTATTGATTTGCGTATATTGAACCAGCCTTGCATCCCAGGGATGAAGCCCACTTGATCATGGTGGATAAGCTTTTTGATGTGCTGCTGGATTCGGTTTGCCAGTATTTTATTGAGGATTTTTGCATCAATGTTCATCAAGGATATTGGTCTAAAATTCTCTTTTTTGGTTGTGTCTCTGCCCGGCTTTGGTATCAGAATGATGCTGGCCTCATAAAATGAGTTAGGGAGGATTCCCTCTTTTTCTATTGATTGGAATAGTTTCAGAAGGAATGGTACCAGTTCCTCCATGTACCTCTGGTAGAATTCGGCTGTGAATCCATCTGGTCCTGGACTCTTTTTGGTTGGTAAACTATTGATTATTGCCACAATTTCAGAGCCTGTTATTGGTCTATTCAGAGATTCAACTTCTTCCTGGTTTAGTCTTGGGAGAGTGTATGTGTCGAGGAATGTATCCATTTCTTCTAGATTTTCTAGTTTATTTGCGTAGAGGTGTTTGTAGTATTCTCTGATGGTAGTTTGTATTTCTGTGGGATCGGTGGTGATATCCCCTTTATCATTTTTTATTGTGTCTATTTGATTCTTCTCTCTTTTTTTCTTTATTAGTCTTGCTAGCGGTCTATCAATTTTGTTGATCCTTTCAAAAAACCAGCTCCTGGATTCATTGATTTTTTGAAGGGTTTTTTGTGTCTCTATTTCCTTCAGTTCTGCTCTGATTTTAGTTATTTCTTGCCTTCTGCTAGCTTTTGAATGTGTTTGCTCTTGCTTTTCTAGTTCTTTTAATTGTGATGTTAGGGTGTCAATTTTGGATCTTTCCTGCTTTCTCTTGTAGGCATTTAGTGCTATAAATTTCCCTCTACACACTGCTTTGAATGCGTCCCAGAGATTCTGGTATGTGGTGTCTTTGTTCTCGTTGGTTTCAAAGAACATCTTTATTTCTGCCTTCATTTCGTTATGTACCCAGTAGTCATTCAGGAGCAGGTTGTTCAGTTTCCATGTAGTTGAGCGGCTTTGAGTGAGATTCTTAATCCTGAGTTCTAGTTTGATTGCACTGTGGTCTGAGAGATAGTTTGTTATAATTTCTGTTCTTTTACATTTGCTGAGGAGAGCTTTACTTCCAACTATGTGGTCAATTTTGGAATAGGTGTGGTGTGGTGCTGAAAAAAAGGTATATTCTGTTGATTTGGGGTGGAGAGTTCTGTAGATGTCTATTAGGTCTGCTTGGTGCAGAGCTGAGTTCAATTCCTGGGTATCCTTGTTGACTTTCTGTCTCGTTGATCTGTCTAATGTTGACAGTGGGGTGTTAAAGTCTCCCATTATTAATGTGTGGGAGTCTAAGTCTCTTTGTAGGTCACTGAGGACTTGCTTTATGAATCTGGGTGCTCCTGTATTGGGTGCATAAATATTTAGGATAGTTAGCTCCTCTTGTTGAATTGATCCCTTTACCATTATGTAATGGCCTTCTTTGTCTCTTTTGATCTTTGTTGGTTTAAAGTCTGTTTTATCAGAGACTAGGATTGCAACCCCTGCCTTTTTTTGTTTTCCATTGGCTTGGTAGATCTTCCTCCATCCTTTTATTTTGAGCCTATGTGTGTCTCTGCACGTGAGATGGGTTTCCTGAATACAGCACACTGATGGGTCTTGACTCTTTATCCAACTTGCCAGTCTGTGTCTTTTAATTGCAGAATTTAGTCCATTTATATTTAAAGTTAATATTGTTATGTGTGAATTTGATCCTGTCATTATGATGTTAGCTGGTGATTTTGCTCATTAGTTGATGCAGTTTCTTCCTAGTCTCGATGGTCTTTACATTTTGGCATGATTTTGCAGCGGCTGGTACCGGTTGTTCCTTTCCATGTTTAGCGCTTCCTTCAGGAGCTCTTTTAGGGCAGGCCTGGTGGTGACAAAATCTCTCAACATTTGCTTGTCTATAAAGTATTTTATTTCTCCTTCACTTATGAAGCTTAGTTTGGCTGGATATGAAATTCTGGGTTGAAAATTCTTTTCTTTAAGAATGTTGAATATTGGCCCCCACTCTCTTCTGGCTTGTAGGGTTTCTGCCGAGAGATCCACTGTTAGTCTGATGGGCTTTCCTTTGAGGGTAACCCGACCTTTCTCTCTGGCTGCCCTTAACATTTTTTCCTTCATTTCAACTTTGGTGAATCTGACAATTATGTGTCTTGGAGTTGCTCTTCTCGAGGAGTATCTTTGTGGCGTTCTCTGTATTTCCTGAATCTGAACGTTGGCCTGCCTTGCTAGATTGGGGAAGTTCTCCTGGATAATATCCTGCAGAGTGTTTTCCAACTTGGTTCCATTCTCCACATCACTTTCAGGTACACCAATCAGACGTAGATTTGGTCTTTTCACATAGTCCCATATTTCTTGGAGGCTTTGCTCATTTCTTTTTATTCTTTTTTCTCTAAACTTCCCTTCTCGCTTCATTTCATTCATTTCATCTTCCATTGCTGATACCCTTTCTTCCAGTTGATCGCATCGGCTCCTGAGGCTTCTGCATTCTTCACGTAGTTCTCGAGCCTTGGTTTTCAGCTCCATCAGCTCCTTTAAGCACTTCTCTGTATTGGTTATTCTAGTTATACATTCTTCTAAATTTTTTTCAAAGTTTTCAACTTCTTTGCCTTTGGTTTGAATGTCCTCCCGTAGCTCAGAGTAATTTGATCGTCTGAAGCCTTCTTCTCTCAGCTCGTCAAAATCATTCTCCATCCAGCTTTGTTCCGTTGCTGGTGAGGAACTGCGTTCCTTTGGAGGAGGAGAGGCGCTCTGCGTTTTAGAGTTTCCAGTTTTTCTGTTCTGTTTTTTCCCCATCTTTGTGGTTTTATCTACTTTTGGTCTTTGATGATGGTGATGTACAGATGGGTTTTCGGTGTAGATGTCCTTTCTGGTTGTTAGTTTTCCTTCTAACAGACAGGACCCTCAGCTGCAGGTCTGTTGGAATACCCTGCCGTGTGAGGTGTCAGTGTGCCCCTGCTGGGGGGTGCCTCCCAGTTAGGCTGCTCGGGGGTCAGGAGTCAGGGACCCACTTGAGGAGGCAGTCTGTCTGCCCGTTCTCAGATCTCCAGCTGCGTGCTGGGAGAACCACTGCTCTCTTCAAAGCTGTCAGACAGGGACACTTAAGTCTGCAGAGGTTACTGCTGTCTTTTTGTTTGTCTGTGCCCTGCCCCCAGAGGTGGAGCCTACAGAGGCAGGCAGGCCTCCTTGAGCTGTGGTGGGCTCCACCCAGTTCGAGCTTCCCGGCTGCTTTGTTTACCTAAGCAAGCCTGGGCAATGGCGGGCGCCCCTCCCCCAGCCTCGTTGCCGCCTTGCAGTTTGATCTCAGACTGCTGTGCTAGCAATCAGCGAGATTCCGTGGGCGTAGGACCCTCCGAGCCAGGTGTGGGATATAGTCTCGTGGTGCGCCGTTTCTTAAGCCGGTCTGAAAAGCGCAATATTCGGGTGGGAGTGACCCGATTTTCCAGGTGCGACCGTCACCCCTTTCTTTGACTCAGAAAGGGAACTCCCTGACCCCTTGCGCTTCCCAGGTGAGGCAATGCCTCGCCCTGCTTCGGCTCGCGCACGGTGCGCACACACACTGGCCTGCGCCCACTGTCTGGCACTCCCTAGTGAGATGAACCCGGTACCTCAGATGGAAATGCAGAAATCACCGTCTTCTGCGTCGCTCACGCTGGGAGCTGTAGACCGGAGCTGTTCCTATTCGGCCATCTTGGCTCCTCCCCC");
     int32_t minSeedAlign = 130;
     int32_t cropSize = 20;  // To cover poly-A tail or micro-insertions at the breakpoint
     int32_t maxFragSize = 7000;
@@ -319,7 +305,7 @@ namespace breaktracer
 
 		    // Full-length approach (good for transductions)
 		    std::string fullseq = sequence.substr(readBp[seed][kLow].seqpos, fragsize);
-                    EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), line1.c_str(), line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+                    EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
 		    double pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (fragsize) );
 		    edlibFreeAlignResult(cigarFull);
 		    if ((pIdFull > pctThres)  &&  ( (double) (fragsize) > ((0.25 * (double) (l1AlignLength)) + l1AlignLength))) {
@@ -335,9 +321,9 @@ namespace breaktracer
 		      std::string subseq = sequence.substr(readBp[seed][kLow].seqpos + cropSize, minSeedAlign);
 		      
 		      // Align to L1
-		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), line1.c_str(), line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
 		      pIdStart = 1.0 - ( (double) (cigar.editDistance) / (double) (minSeedAlign) );
-		      //printAlignment(subseq, line1, EDLIB_MODE_HW, cigar);
+		      //printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
 		      edlibFreeAlignResult(cigar);
 		      if (pIdStart <= pctThres) continue; // No hit
 		    }
@@ -347,9 +333,9 @@ namespace breaktracer
 		    std::string subseq = sequence.substr(sCoord, minSeedAlign);
 		      
 		      // Align to L1
-		    EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), line1.c_str(), line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+		    EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
 		    pIdEnd = 1.0 - ( (double) (cigar.editDistance) / (double) (minSeedAlign) );
-		    //printAlignment(subseq, line1, EDLIB_MODE_HW, cigar);
+		    //printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
 		    edlibFreeAlignResult(cigar);
 		    if (pIdEnd <= pctThres) continue; // No hit
 
@@ -363,9 +349,9 @@ namespace breaktracer
 			std::string subseq = sequence.substr(sIter, minSeedAlign);
 		    
 			// Align to L1
-			EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), line1.c_str(), line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+			EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
 			double pIdInfix = 1.0 - ( (double) (cigar.editDistance) / (double) (minSeedAlign) );
-			//printAlignment(subseq, line1, EDLIB_MODE_HW, cigar);
+			//printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
 			edlibFreeAlignResult(cigar);
 			percentIdentity += pIdInfix;
 			++nCount;
@@ -396,9 +382,9 @@ namespace breaktracer
 		      std::string subseq = sequence.substr(sCoord, fragsize);
 		      
 		      // Align to L1
-		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), line1.c_str(), line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
 		      double percentIdentity = 1.0 - ( (double) (cigar.editDistance) / (double) (fragsize) );
-		      //printAlignment(subseq, line1, EDLIB_MODE_HW, cigar);
+		      //printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
 		      edlibFreeAlignResult(cigar);		      
 		      if (percentIdentity > pctThres) validRead = false;
 		    }
