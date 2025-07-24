@@ -205,7 +205,7 @@ namespace breaktracer
       buf = std::cout.rdbuf();
     }
     std::ostream out(buf);
-    out << "L1InsType\tReadName\tRefCoordBefore\tRefCoordAfter\tL1FragmentSize\tL1Similarity" << std::endl;
+    out << "Sample\tL1InsType\tReadName\tRefCoordBefore\tRefCoordAfter\tL1FragmentSize\tL1Similarity" << std::endl;
     
     int32_t minSeedAlign = 130;
     int32_t cropSize = 20;  // To cover poly-A tail or micro-insertions at the breakpoint
@@ -405,6 +405,7 @@ namespace breaktracer
 		  // Output read
 		  if (validRead) {
 		    int32_t offset = std::abs(readBp[seed][kLow].refpos - readBp[seed][kHigh].refpos);
+		    out << c.sampleName[file_c] << '\t';
 		    if (readBp[seed][kLow].refidx != readBp[seed][kHigh].refidx) out << "Inter-chromosomal SV with L1 fragment" << '\t';
 		    else if (offset > 1000) out << "Intra-chromosomal SV with L1 fragment" << '\t';
 		    else out << "L1 insertion" << '\t';
