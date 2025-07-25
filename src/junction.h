@@ -18,23 +18,6 @@
 namespace breaktracer
 {
 
-  // Junction record
-  struct Junction {
-    bool forward;
-    bool scleft;
-    int32_t refidx;
-    int32_t refpos;
-    int32_t seqpos;
-    uint16_t qual;
-
-    Junction(bool const fw, bool const cl, int32_t const idx, int32_t const r, int32_t const s, uint16_t const qval) : forward(fw), scleft(cl), refidx(idx), refpos(r), seqpos(s), qual(qval) {}
-
-    bool operator<(const Junction& j2) const {
-      return ((seqpos<j2.seqpos) || ((seqpos==j2.seqpos) && (refidx<j2.refidx)) || ((seqpos==j2.seqpos) && (refidx==j2.refidx) && (refpos<j2.refpos)) || ((seqpos==j2.seqpos) && (refidx==j2.refidx) && (refpos==j2.refpos) && (scleft < j2.scleft)));
-    }
-  };
-
-  
   template<typename TReadBp>
   inline void
     _insertJunction(TReadBp& readBp, std::size_t const seed, bam1_t* rec, int32_t const rp, int32_t const sp, bool const scleft) {
@@ -194,19 +177,7 @@ namespace breaktracer
 
   template<typename TConfig, typename TReadBp>
   inline void
-  findL1(TConfig const& c, TReadBp& readBp) {
-    // Open output file
-    std::streambuf * buf;
-    std::ofstream of;
-    if(c.outfile.string() != "-") {
-      of.open(c.outfile.string().c_str());
-      buf = of.rdbuf();
-    } else {
-      buf = std::cout.rdbuf();
-    }
-    std::ostream out(buf);
-    out << "Sample\tL1InsType\tReadName\tRefCoordBefore\tRefCoordAfter\tL1FragmentSize\tL1Similarity" << std::endl;
-    
+  findL1(TConfig const& c, TReadBp& readBp, std::vector<TraceRecord>& tr) {
     int32_t minSeedAlign = 130;
     int32_t cropSize = 20;  // To cover poly-A tail or micro-insertions at the breakpoint
     int32_t maxFragSize = 7000;
@@ -402,18 +373,10 @@ namespace breaktracer
 		    }
 		  }
 
-		  // Output read
+		  // Store read
 		  if (validRead) {
-		    int32_t offset = std::abs(readBp[seed][kLow].refpos - readBp[seed][kHigh].refpos);
-		    out << c.sampleName[file_c] << '\t';
-		    if (readBp[seed][kLow].refidx != readBp[seed][kHigh].refidx) out << "Inter-chromosomal SV with L1 fragment" << '\t';
-		    else if (offset > 1000) out << "Intra-chromosomal SV with L1 fragment" << '\t';
-		    else out << "L1 insertion" << '\t';
-		    out << bam_get_qname(rec) << '\t';
-		    out << hdr->target_name[readBp[seed][kLow].refidx] << ':' << readBp[seed][kLow].refpos << " (ReadPos: " << readBp[seed][kLow].seqpos << ')' << '\t';
-		    out << hdr->target_name[readBp[seed][kHigh].refidx] << ':' << readBp[seed][kHigh].refpos << " (ReadPos: " << readBp[seed][kHigh].seqpos << ')' << '\t';
-		    out << l1AlignLength << '\t';
-		    out << pid << std::endl;
+		    if (readBp[seed][kLow].refidx <= readBp[seed][kHigh].refidx) tr.push_back(TraceRecord(readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, (int32_t) (pid * 100), l1AlignLength, seed));
+		    else tr.push_back(TraceRecord(readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, (int32_t) (pid * 100), l1AlignLength, seed));
 		  }
 		}
 	      }
@@ -432,13 +395,13 @@ namespace breaktracer
       sam_close(samfile[file_c]);
     }
 
-    // Close file
-    if(c.outfile.string() != "-") of.close();
+    // Sort traces
+    std::sort(tr.begin(), tr.end());
   }   
   
   template<typename TConfig>
   inline void
-  brInTraces(TConfig const& c) {
+  brInTraces(TConfig const& c, std::vector<TraceRecord>& tr) {
     // Breakpoints
     typedef std::vector<Junction> TJunctionVector;
     typedef std::map<std::size_t, TJunctionVector> TReadBp;
@@ -446,9 +409,8 @@ namespace breaktracer
     findJunctions(c, readBp);
 
     // Line1
-    findL1(c, readBp);    
+    findL1(c, readBp, tr);    
   }
-
 
 }
 

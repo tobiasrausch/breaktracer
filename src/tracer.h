@@ -24,6 +24,7 @@
 #include "edlib.h"
 #include "util.h"
 #include "junction.h"
+#include "cluster.h"
 
 namespace breaktracer {
 
@@ -33,6 +34,8 @@ namespace breaktracer {
     uint32_t maxReadSep;
     uint32_t minRefSep;
     uint32_t minClip;
+    uint32_t graphPruning;
+    uint32_t minCliqueSize;
     int32_t nchr;
     float indelExtension;
     boost::filesystem::path outfile;
@@ -41,7 +44,52 @@ namespace breaktracer {
     std::vector<std::string> sampleName;
   };
   
+  template<typename TConfig>
+  inline void
+  output(TConfig const& c, std::vector<BrInTrace>& sv) {
+    // Open output file
+    std::streambuf * buf;
+    std::ofstream of;
+    if(c.outfile.string() != "-") {
+      of.open(c.outfile.string().c_str());
+      buf = of.rdbuf();
+    } else {
+      buf = std::cout.rdbuf();
+    }
+    std::ostream out(buf);
+    out << "BrInId\tRefCoord1\tRefCoord2\tBrInFragmentSize\tQuality\tReadSupport\tBrInType" << std::endl;
 
+    // Open file handles
+    samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
+    hts_set_fai_filename(samfile, c.genome.string().c_str());
+    hts_idx_t* idx = sam_index_load(samfile, c.files[0].string().c_str());
+    bam_hdr_t* hdr = sam_hdr_read(samfile);
+
+    for(uint32_t i = 0; i < sv.size(); ++i) {
+      std::string padNumber = boost::lexical_cast<std::string>(i);
+      padNumber.insert(padNumber.begin(), 8 - padNumber.length(), '0');
+      out << "BRINS" << padNumber << '\t';
+      out << hdr->target_name[sv[i].chr] << ':' << sv[i].pos << '\t';
+      out << hdr->target_name[sv[i].chr2] << ':' << sv[i].pos2 << '\t';
+      out << sv[i].inslen << '\t';
+      out << sv[i].qual << '\t';
+      out << sv[i].seeds.size() << '\t';
+      int32_t offset = std::abs(sv[i].pos - sv[i].pos2);
+      //out << c.sampleName[file_c] << '\t';
+      if (sv[i].chr != sv[i].chr2) out << "InterChromosomalSVwithInsertion";
+      else if (offset > 1000) out << "IntraChromosomalSVwithInsertion";
+      else out << "PlainInsertion";
+      out << std::endl;
+    }
+    
+    // Clean-up
+    bam_hdr_destroy(hdr);
+    hts_idx_destroy(idx);
+    sam_close(samfile);
+    if(c.outfile.string() != "-") of.close();
+  }
+
+  
  template<typename TConfig>
  inline int32_t
  runTracer(TConfig& c) {
@@ -51,7 +99,17 @@ namespace breaktracer {
 #endif
 
    // Search breakpoint insertion traces
-   brInTraces(c);
+   typedef std::vector<TraceRecord> TTraceVector;
+   TTraceVector tr;
+   brInTraces(c, tr);
+
+   // Cluster reads
+   typedef std::vector<BrInTrace> TBrInVector;
+   TBrInVector sv;
+   cluster(c, tr, sv);
+
+   // Output
+   output(c, sv);
    
 #ifdef PROFILE
    ProfilerStop();
@@ -83,11 +141,13 @@ namespace breaktracer {
      ("minrefsep,m", boost::program_options::value<uint32_t>(&c.minRefSep)->default_value(30), "min. reference separation")
      ("map-qual,q", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(1), "min. mapping quality")
      ("minclip,c", boost::program_options::value<uint32_t>(&c.minClip)->default_value(25), "min. clipping length")
+     ("min-clique-size,z", boost::program_options::value<uint32_t>(&c.minCliqueSize)->default_value(3), "min. clique size")
      ;
 
    boost::program_options::options_description hidden("Hidden options");
    hidden.add_options()
      ("input-file", boost::program_options::value< std::vector<boost::filesystem::path> >(&c.files), "input file")
+     ("pruning,j", boost::program_options::value<uint32_t>(&c.graphPruning)->default_value(1000), "graph pruning cutoff")
      ;
    
    boost::program_options::positional_options_description pos_args;
@@ -109,6 +169,9 @@ namespace breaktracer {
      return 0;
    }
 
+   // Clique size
+   if (c.minCliqueSize < 2) c.minCliqueSize = 2;
+   
    // Check reference
    if (!(boost::filesystem::exists(c.genome) && boost::filesystem::is_regular_file(c.genome) && boost::filesystem::file_size(c.genome))) {
      std::cerr << "Reference file is missing: " << c.genome.string() << std::endl;
