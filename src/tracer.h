@@ -25,6 +25,7 @@
 #include "util.h"
 #include "junction.h"
 #include "cluster.h"
+#include "consensus.h"
 
 namespace breaktracer {
 
@@ -36,6 +37,7 @@ namespace breaktracer {
     uint32_t minClip;
     uint32_t graphPruning;
     uint32_t minCliqueSize;
+    uint32_t maxReadPerSV;
     int32_t nchr;
     float indelExtension;
     boost::filesystem::path outfile;
@@ -57,7 +59,7 @@ namespace breaktracer {
       buf = std::cout.rdbuf();
     }
     std::ostream out(buf);
-    out << "BrInId\tRefCoord1\tRefCoord2\tBrInFragmentSize\tQuality\tReadSupport\tBrInType" << std::endl;
+    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence" << std::endl;
 
     // Open file handles
     samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
@@ -79,6 +81,9 @@ namespace breaktracer {
       if (sv[i].chr != sv[i].chr2) out << "InterChromosomalSVwithInsertion";
       else if (offset > 1000) out << "IntraChromosomalSVwithInsertion";
       else out << "PlainInsertion";
+      out << '\t';
+      out << sv[i].consensus.size() << '\t';
+      out << sv[i].consensus;
       out << std::endl;
     }
     
@@ -108,6 +113,9 @@ namespace breaktracer {
    TBrInVector sv;
    cluster(c, tr, sv);
 
+   // Assemble
+   assemble(c, tr, sv);
+   
    // Output
    output(c, sv);
    
@@ -142,6 +150,7 @@ namespace breaktracer {
      ("map-qual,q", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(1), "min. mapping quality")
      ("minclip,c", boost::program_options::value<uint32_t>(&c.minClip)->default_value(25), "min. clipping length")
      ("min-clique-size,z", boost::program_options::value<uint32_t>(&c.minCliqueSize)->default_value(3), "min. clique size")
+     ("max-reads,p", boost::program_options::value<uint32_t>(&c.maxReadPerSV)->default_value(15), "max. reads for local assembly")
      ;
 
    boost::program_options::options_description hidden("Hidden options");

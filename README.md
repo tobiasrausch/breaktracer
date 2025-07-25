@@ -14,7 +14,7 @@ BreakTracer can be build from source using a recursive clone and make. BreakTrac
 
 To identify L1 fragments at structural variant breakpoints.
 
-`breaktracer find -g hg38.fa input.bam > bp.reads.tsv`
+`breaktracer find -g hg38.fa input.bam > breakpoint.insertion.tsv`
 
 License
 -------

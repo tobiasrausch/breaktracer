@@ -37,7 +37,7 @@ namespace breaktracer
   struct TraceRecord {
     int32_t chr;
     int32_t pos;
-    int32_t seqpos1;
+    int32_t seqpos;
     int32_t chr2;
     int32_t pos2;
     int32_t seqpos2;
@@ -45,7 +45,7 @@ namespace breaktracer
     int32_t inslen;
     std::size_t id;
         
-    TraceRecord(int32_t const c, int32_t const p, int32_t const s, int32_t const c2, int32_t const p2, int32_t const s2, int32_t const qval, int32_t const il, std::size_t const idval) : chr(c), pos(p), seqpos1(s), chr2(c2), pos2(p2), seqpos2(s2), qual(qval), inslen(il), id(idval) {}
+    TraceRecord(int32_t const c, int32_t const p, int32_t const s, int32_t const c2, int32_t const p2, int32_t const s2, int32_t const qval, int32_t const il, std::size_t const idval) : chr(c), pos(p), seqpos(s), chr2(c2), pos2(p2), seqpos2(s2), qual(qval), inslen(il), id(idval) {}
 
     bool operator<(const TraceRecord& sv2) const {
       return ((chr<sv2.chr) || ((chr==sv2.chr) && (pos<sv2.pos)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2<sv2.chr2)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2==sv2.chr2) && (pos2 < sv2.pos2)));
@@ -61,8 +61,9 @@ namespace breaktracer
     int32_t qual;
     int32_t inslen;
     std::set<std::size_t> seeds;
+    std::string consensus;
     
-    BrInTrace(int32_t const c, int32_t const p, int32_t const c2, int32_t const p2, int32_t const qval, int32_t const ilen, std::set<std::size_t> const& svals): chr(c), pos(p), chr2(c2), pos2(p2), qual(qval), inslen(ilen), seeds(svals) {}
+    BrInTrace(int32_t const c, int32_t const p, int32_t const c2, int32_t const p2, int32_t const qval, int32_t const ilen, std::set<std::size_t> const& svals): chr(c), pos(p), chr2(c2), pos2(p2), qual(qval), inslen(ilen), seeds(svals), consensus("") {}
 
     bool operator<(const BrInTrace& sv2) const {
       return ((chr<sv2.chr) || ((chr==sv2.chr) && (pos<sv2.pos)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2<sv2.chr2)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2==sv2.chr2) && (pos2<sv2.pos2)));
