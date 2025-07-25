@@ -128,6 +128,9 @@ namespace breaktracer
   template<typename TConfig>
   inline void
   cluster(TConfig const& c, std::vector<TraceRecord>& tr, std::vector<BrInTrace>& sv) {
+    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
+    std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Clustering" << std::endl;
+    
     uint32_t count = 0;
     for(int32_t refIdx = 0; refIdx < c.nchr; ++refIdx) {
       
