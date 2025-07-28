@@ -177,11 +177,17 @@ namespace breaktracer
 
   template<typename TConfig, typename TReadBp>
   inline void
-  findL1(TConfig const& c, TReadBp& readBp, std::vector<TraceRecord>& tr) {
-    int32_t minSeedAlign = 130;
-    int32_t cropSize = 20;  // To cover poly-A tail or micro-insertions at the breakpoint
-    int32_t maxFragSize = 7000;
-    float pctThres = 0.9;
+  findBrIn(TConfig const& c, TReadBp& readBp, std::vector<TraceRecord>& tr) {
+    std::string searchseq;
+    if (c.insmode == 1) searchseq = MEI::alu;
+    else if (c.insmode ==3) searchseq = MEI::sva;
+    else searchseq = MEI::line1;
+    int32_t maxFragSize = searchseq.size() + 0.15 * searchseq.size();
+
+    // Augment with reverse complement
+    std::string revseq = searchseq;
+    reverseComplement(revseq);
+    searchseq += revseq;
 
     // Open file handles
     typedef std::vector<samFile*> TSamFile;
@@ -199,7 +205,7 @@ namespace breaktracer
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Insertion serach" << std::endl;
 
-    // L1 candidate read search
+    // Insertion candidate read search
     std::set<std::size_t> clusteredReads;
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
       typedef boost::dynamic_bitset<> TBitSet;
@@ -247,7 +253,7 @@ namespace breaktracer
       //std::cerr << refIndex << ',' << clusteredReads.size() << std::endl;
     }
 
-    // Find L1
+    // Find insertion
     if (!clusteredReads.empty()) {
       for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
 	// Collect reads from all samples
@@ -265,19 +271,19 @@ namespace breaktracer
 		std::string sequence;
 		
 		// Get all sequences embedded in breakpoints
-		uint32_t l1AlignLength = 0;
+		uint32_t insAlignLength = 0;
 		uint32_t kLow = 0;
 		uint32_t kHigh = 0;
 		double pid = 0;
 		double pIdStart = 0;
 		double pIdEnd = 0;
 		for(uint32_t k = 1; k < readBp[seed].size(); ++k) {
-		  if (readBp[seed][k].seqpos < (minSeedAlign + cropSize) ) continue;
-		  if (readBp[seed][k].seqpos + (minSeedAlign + cropSize) > rec->core.l_qseq) continue;
-		  if (!l1AlignLength) kLow = k - 1;  // No previous hit
+		  if (readBp[seed][k].seqpos < (c.minSeedAlign + c.cropSize) ) continue;
+		  if (readBp[seed][k].seqpos + (c.minSeedAlign + c.cropSize) > rec->core.l_qseq) continue;
+		  if (!insAlignLength) kLow = k - 1;  // No previous hit
 		  int32_t fragsize = readBp[seed][k].seqpos - readBp[seed][kLow].seqpos;
-		  if ((fragsize > (minSeedAlign + cropSize)) && (fragsize < maxFragSize)) {
-		    // L1 fragment?
+		  if ((fragsize > (c.minSeedAlign + c.cropSize)) && (fragsize < maxFragSize)) {
+		    // Insertion fragment?
 		    if (sequence.empty()) {
 		      sequence.resize(rec->core.l_qseq);
 		      const uint8_t* seqptr = bam_get_seq(rec);
@@ -288,53 +294,53 @@ namespace breaktracer
 
 		    // Full-length approach (good for transductions)
 		    std::string fullseq = sequence.substr(readBp[seed][kLow].seqpos, fragsize);
-                    EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+                    EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
 		    double pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (fragsize) );
 		    edlibFreeAlignResult(cigarFull);
-		    if ((pIdFull > pctThres)  &&  ( (double) (fragsize) > ((0.25 * (double) (l1AlignLength)) + l1AlignLength))) {
+		    if ((pIdFull > c.pctThres)  &&  ( (double) (fragsize) > ((0.25 * (double) (insAlignLength)) + insAlignLength))) {
 		      kHigh = k;
-		      l1AlignLength = fragsize;
+		      insAlignLength = fragsize;
 		      pid = pIdFull;
 		      continue;
 		    }
-		    // Partial approach (good for rearranged L1s)
+		    // Partial approach (good for rearranged insertions)
 
 		    // Check infix start (if not checked yet)
-		    if (!l1AlignLength) {
-		      std::string subseq = sequence.substr(readBp[seed][kLow].seqpos + cropSize, minSeedAlign);
+		    if (!insAlignLength) {
+		      std::string subseq = sequence.substr(readBp[seed][kLow].seqpos + c.cropSize, c.minSeedAlign);
 		      
-		      // Align to L1
-		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-		      pIdStart = 1.0 - ( (double) (cigar.editDistance) / (double) (minSeedAlign) );
-		      //printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
+		      // Align to Insertions
+		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+		      pIdStart = 1.0 - ( (double) (cigar.editDistance) / (double) (c.minSeedAlign) );
+		      //printAlignment(subseq, searchseq, EDLIB_MODE_HW, cigar);
 		      edlibFreeAlignResult(cigar);
-		      if (pIdStart <= pctThres) continue; // No hit
+		      if (pIdStart <= c.pctThres) continue; // No hit
 		    }
 		    
 		    // Always check infix end
-		    int32_t sCoord = readBp[seed][k].seqpos - (minSeedAlign + cropSize);
-		    std::string subseq = sequence.substr(sCoord, minSeedAlign);
+		    int32_t sCoord = readBp[seed][k].seqpos - (c.minSeedAlign + c.cropSize);
+		    std::string subseq = sequence.substr(sCoord, c.minSeedAlign);
 		      
-		      // Align to L1
-		    EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-		    pIdEnd = 1.0 - ( (double) (cigar.editDistance) / (double) (minSeedAlign) );
-		    //printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
+		      // Align to Insertions
+		    EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+		    pIdEnd = 1.0 - ( (double) (cigar.editDistance) / (double) (c.minSeedAlign) );
+		    //printAlignment(subseq, searchseq, EDLIB_MODE_HW, cigar);
 		    edlibFreeAlignResult(cigar);
-		    if (pIdEnd <= pctThres) continue; // No hit
+		    if (pIdEnd <= c.pctThres) continue; // No hit
 
 		    // At least 25% larger hit?
-		    if ( (double) (fragsize) > ((0.25 * (double) (l1AlignLength)) + l1AlignLength) ) {
+		    if ( (double) (fragsize) > ((0.25 * (double) (insAlignLength)) + insAlignLength) ) {
 
 		      // Align remaining internal segments
 		      double percentIdentity = pIdStart + pIdEnd;
 		      int32_t nCount = 2;
-		      for(int32_t sIter = readBp[seed][kLow].seqpos + minSeedAlign + cropSize; sIter + minSeedAlign < (readBp[seed][k].seqpos - (minSeedAlign + cropSize)); sIter += minSeedAlign) {
-			std::string subseq = sequence.substr(sIter, minSeedAlign);
+		      for(int32_t sIter = readBp[seed][kLow].seqpos + c.minSeedAlign + c.cropSize; sIter + c.minSeedAlign < (readBp[seed][k].seqpos - (c.minSeedAlign + c.cropSize)); sIter += c.minSeedAlign) {
+			std::string subseq = sequence.substr(sIter, c.minSeedAlign);
 		    
-			// Align to L1
-			EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-			double pIdInfix = 1.0 - ( (double) (cigar.editDistance) / (double) (minSeedAlign) );
-			//printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
+			// Align to Insertions
+			EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+			double pIdInfix = 1.0 - ( (double) (cigar.editDistance) / (double) (c.minSeedAlign) );
+			//printAlignment(subseq, searchseq, EDLIB_MODE_HW, cigar);
 			edlibFreeAlignResult(cigar);
 			percentIdentity += pIdInfix;
 			++nCount;
@@ -343,16 +349,16 @@ namespace breaktracer
 		      percentIdentity /= (double) nCount;
 
 		      // Entire sequence highly-similar?
-		      if (percentIdentity > pctThres) {
+		      if (percentIdentity > c.pctThres) {
 			kHigh = k;
-			l1AlignLength = fragsize;
+			insAlignLength = fragsize;
 			pid = percentIdentity;
 		      }
 		    }
 		  }
 		}
-		if (l1AlignLength) {
-		  // Make sure the leading and trailing sequence is NOT L1 sequence
+		if (insAlignLength) {
+		  // Make sure the leading and trailing sequence is NOT insertion sequence
 		  bool validRead = true;
 		  for(int32_t bp = 0; ((bp < 2) && (validRead)); ++bp) {
 		    int32_t fragsize = readBp[seed][kLow].seqpos;
@@ -361,23 +367,23 @@ namespace breaktracer
 		      sCoord = readBp[seed][kHigh].seqpos;
 		      fragsize = sequence.size() - sCoord;
 		    }
-		    if (fragsize < maxFragSize) {   // Otherwise clearly more than L1 content
+		    if (fragsize < maxFragSize) {   // Otherwise clearly more than insertion content
 		      std::string subseq = sequence.substr(sCoord, fragsize);
 		      
-		      // Align to L1
-		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), MEI::line1.c_str(), MEI::line1.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+		      // Align to insertion
+		      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
 		      double percentIdentity = 1.0 - ( (double) (cigar.editDistance) / (double) (fragsize) );
-		      //printAlignment(subseq, MEI::line1, EDLIB_MODE_HW, cigar);
+		      //printAlignment(subseq, searchseq, EDLIB_MODE_HW, cigar);
 		      edlibFreeAlignResult(cigar);		      
-		      if (percentIdentity > pctThres) validRead = false;
+		      if (percentIdentity > c.pctThres) validRead = false;
 		    }
 		  }
 
 		  // Store read
 		  if (validRead) {
 		    // Canonical ordering
-		    if ((readBp[seed][kLow].refidx < readBp[seed][kHigh].refidx) || ( ( readBp[seed][kLow].refidx == readBp[seed][kHigh].refidx ) && (readBp[seed][kLow].refpos <= readBp[seed][kHigh].refpos) ) ) tr.push_back(TraceRecord(readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, (int32_t) (pid * 100), l1AlignLength, seed));
-		    else tr.push_back(TraceRecord(readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, (int32_t) (pid * 100), l1AlignLength, seed));
+		    if ((readBp[seed][kLow].refidx < readBp[seed][kHigh].refidx) || ( ( readBp[seed][kLow].refidx == readBp[seed][kHigh].refidx ) && (readBp[seed][kLow].refpos <= readBp[seed][kHigh].refpos) ) ) tr.push_back(TraceRecord(readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, (int32_t) (pid * 100), insAlignLength, seed));
+		    else tr.push_back(TraceRecord(readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, (int32_t) (pid * 100), insAlignLength, seed));
 		  }
 		}
 	      }
@@ -409,8 +415,8 @@ namespace breaktracer
     TReadBp readBp;
     findJunctions(c, readBp);
 
-    // Line1
-    findL1(c, readBp, tr);    
+    // Search breakpoint insertions
+    findBrIn(c, readBp, tr);    
   }
 
 }

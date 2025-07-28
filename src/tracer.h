@@ -31,18 +31,22 @@ namespace breaktracer {
 
 
   struct TracerConfig {
+    uint16_t insmode;
     uint16_t minMapQual;
-    uint32_t maxReadSep;
     uint32_t minRefSep;
     uint32_t minClip;
     uint32_t graphPruning;
     uint32_t minCliqueSize;
     uint32_t maxReadPerSV;
     int32_t nchr;
+    int32_t minSeedAlign;
+    int32_t cropSize;
+    float pctThres;
     float indelExtension;
     boost::filesystem::path outfile;
     std::vector<boost::filesystem::path> files;
     boost::filesystem::path genome;
+    boost::filesystem::path insseq;
     std::vector<std::string> sampleName;
   };
   
@@ -135,6 +139,7 @@ namespace breaktracer {
    
    // Parameter
    std::string mode;
+   std::string instag;
    boost::program_options::options_description generic("Generic options");
    generic.add_options()
      ("help,?", "show help message")
@@ -143,14 +148,22 @@ namespace breaktracer {
      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "BCF output file")
      ;
    
-   boost::program_options::options_description disc("Discovery options");
+   boost::program_options::options_description disc("Split-read options");
    disc.add_options()
-     ("maxreadsep,n", boost::program_options::value<uint32_t>(&c.maxReadSep)->default_value(100), "max. read separation")
      ("minrefsep,m", boost::program_options::value<uint32_t>(&c.minRefSep)->default_value(30), "min. reference separation")
      ("map-qual,q", boost::program_options::value<uint16_t>(&c.minMapQual)->default_value(1), "min. mapping quality")
      ("minclip,c", boost::program_options::value<uint32_t>(&c.minClip)->default_value(25), "min. clipping length")
      ("min-clique-size,z", boost::program_options::value<uint32_t>(&c.minCliqueSize)->default_value(3), "min. clique size")
      ("max-reads,p", boost::program_options::value<uint32_t>(&c.maxReadPerSV)->default_value(15), "max. reads for local assembly")
+     ;
+
+   boost::program_options::options_description brin("Breakpoint insertion options");
+   brin.add_options()
+     ("cropsize,r", boost::program_options::value<int32_t>(&c.cropSize)->default_value(20), "leading/trailing crop size")
+     ("seedlen,s", boost::program_options::value<int32_t>(&c.minSeedAlign)->default_value(130), "min. seed length")
+     ("pctid,i", boost::program_options::value<float>(&c.pctThres)->default_value(0.9), "min. percent identity")
+     ("instag,t", boost::program_options::value<std::string>(&instag)->default_value("L1"), "Type of insertion [ALU|L1|SVA]")
+     ("insseq,e", boost::program_options::value<boost::filesystem::path>(&c.insseq), "FASTA with insertion sequence [overrides -e]")
      ;
 
    boost::program_options::options_description hidden("Hidden options");
@@ -163,9 +176,9 @@ namespace breaktracer {
    pos_args.add("input-file", -1);
    
    boost::program_options::options_description cmdline_options;
-   cmdline_options.add(generic).add(disc).add(hidden);
+   cmdline_options.add(generic).add(disc).add(brin).add(hidden);
    boost::program_options::options_description visible_options;
-   visible_options.add(generic).add(disc);
+   visible_options.add(generic).add(disc).add(brin);
    boost::program_options::variables_map vm;
    boost::program_options::store(boost::program_options::command_line_parser(argc, argv).options(cmdline_options).positional(pos_args).run(), vm);
    boost::program_options::notify(vm);
@@ -262,6 +275,12 @@ namespace breaktracer {
    // Run Tegua
    if (mode == "pb") c.indelExtension = 0.7;
    else if (mode == "ont") c.indelExtension = 0.5;
+
+   // Insertion mode, 0=FASTA, 1=ALU, 2=L1, 3=SVA
+   if (instag == "ALU") c.insmode = 1;
+   else if (instag == "SVA") c.insmode = 3;
+   else c.insmode = 2;
+
    return runTracer(c);
  }
 

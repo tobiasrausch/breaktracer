@@ -23,7 +23,7 @@ inline void
 displayUsage() {
   std::cerr << "Usage: breaktracer <command> <arguments>" << std::endl;
   std::cerr << std::endl;
-  std::cerr << "    find        trace L1 inserted sequence fragment" << std::endl;
+  std::cerr << "    find        trace inserted sequence fragment" << std::endl;
   std::cerr << std::endl;
 }
 
