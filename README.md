@@ -2,7 +2,17 @@
 
 ## Installing breaktracer
 
-BreakTracer can be build from source using a recursive clone and make. BreakTracer depends on [HTSlib](https://github.com/samtools/htslib) and [Boost](https://www.boost.org/).
+BreakTracer is available as a [statically linked binary](https://github.com/tobiasrausch/breaktracer/releases/) or as a [singularity containter (SIF file)](https://github.com/tobiasrausch/breaktracer/releases/).
+
+`wget https://github.com/tobiasrausch/breaktracer/releases/download/v0.0.3/breaktracer_v0.0.3_linux_x86_64bit`
+
+`chmod a+x breaktracer_v0.0.3_linux_x86_64bit`
+
+`./breaktracer_v0.0.3_linux_x86_64bit`
+
+## Building from source
+
+BreakTracer can be built from source using a recursive clone and make. BreakTracer depends on [HTSlib](https://github.com/samtools/htslib) and [Boost](https://www.boost.org/).
 
 `git clone --recursive https://github.com/tobiasrausch/breaktracer.git`
 
