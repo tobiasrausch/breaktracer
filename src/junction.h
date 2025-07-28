@@ -179,7 +179,11 @@ namespace breaktracer
   inline void
   findBrIn(TConfig const& c, TReadBp& readBp, std::vector<TraceRecord>& tr) {
     std::string searchseq;
-    if (c.insmode == 1) searchseq = MEI::alu;
+    if (c.insmode == 0) {
+      std::string faname = "";
+      if (!loadSingleFasta(c.insseq.string(), faname, searchseq)) return;
+    }
+    else if (c.insmode == 1) searchseq = MEI::alu;
     else if (c.insmode ==3) searchseq = MEI::sva;
     else searchseq = MEI::line1;
     int32_t maxFragSize = searchseq.size() + 0.15 * searchseq.size();

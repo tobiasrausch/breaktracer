@@ -265,6 +265,22 @@ namespace breaktracer {
      }
    }
 
+   // Long-read options
+   if (mode == "pb") c.indelExtension = 0.7;
+   else if (mode == "ont") c.indelExtension = 0.5;
+
+   // Insertion mode, 0=FASTA, 1=ALU, 2=L1, 3=SVA
+   if (vm.count("insseq")) {
+     c.insmode = 0;
+     if (!(boost::filesystem::exists(c.insseq) && boost::filesystem::is_regular_file(c.insseq) && boost::filesystem::file_size(c.insseq))) {
+       std::cerr << "Insertion sequence file is missing: " << c.insseq.string() << std::endl;
+       return 1;
+     }
+   }
+   else if (instag == "ALU") c.insmode = 1;
+   else if (instag == "SVA") c.insmode = 3;
+   else c.insmode = 2;
+
    // Show cmd
    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
    std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] ";
@@ -272,15 +288,6 @@ namespace breaktracer {
    for(int i=0; i<argc; ++i) { std::cerr << argv[i] << ' '; }
    std::cerr << std::endl;
    
-   // Run Tegua
-   if (mode == "pb") c.indelExtension = 0.7;
-   else if (mode == "ont") c.indelExtension = 0.5;
-
-   // Insertion mode, 0=FASTA, 1=ALU, 2=L1, 3=SVA
-   if (instag == "ALU") c.insmode = 1;
-   else if (instag == "SVA") c.insmode = 3;
-   else c.insmode = 2;
-
    return runTracer(c);
  }
 
