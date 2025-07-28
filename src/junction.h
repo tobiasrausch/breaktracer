@@ -375,7 +375,8 @@ namespace breaktracer
 
 		  // Store read
 		  if (validRead) {
-		    if (readBp[seed][kLow].refidx <= readBp[seed][kHigh].refidx) tr.push_back(TraceRecord(readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, (int32_t) (pid * 100), l1AlignLength, seed));
+		    // Canonical ordering
+		    if ((readBp[seed][kLow].refidx < readBp[seed][kHigh].refidx) || ( ( readBp[seed][kLow].refidx == readBp[seed][kHigh].refidx ) && (readBp[seed][kLow].refpos <= readBp[seed][kHigh].refpos) ) ) tr.push_back(TraceRecord(readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, (int32_t) (pid * 100), l1AlignLength, seed));
 		    else tr.push_back(TraceRecord(readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, (int32_t) (pid * 100), l1AlignLength, seed));
 		  }
 		}
