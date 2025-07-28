@@ -181,7 +181,7 @@ namespace breaktracer
     std::string searchseq;
     if (c.insmode == 0) {
       std::string faname = "";
-      if (!loadSingleFasta(c.insseq.string(), faname, searchseq)) return;
+      if (!loadSingleFasta(c, faname, searchseq)) return;
     }
     else if (c.insmode == 1) searchseq = MEI::alu;
     else if (c.insmode ==3) searchseq = MEI::sva;
