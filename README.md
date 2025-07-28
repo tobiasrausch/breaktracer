@@ -4,11 +4,11 @@
 
 BreakTracer is available as a [statically linked binary](https://github.com/tobiasrausch/breaktracer/releases/) or as a [singularity containter (SIF file)](https://github.com/tobiasrausch/breaktracer/releases/).
 
-`wget https://github.com/tobiasrausch/breaktracer/releases/download/v0.0.3/breaktracer_v0.0.3_linux_x86_64bit`
-
-`chmod a+x breaktracer_v0.0.3_linux_x86_64bit`
-
-`./breaktracer_v0.0.3_linux_x86_64bit`
+```
+wget https://github.com/tobiasrausch/breaktracer/releases/download/v0.0.3/breaktracer_v0.0.3_linux_x86_64bit
+chmod a+x breaktracer_v0.0.3_linux_x86_64bit
+./breaktracer_v0.0.3_linux_x86_64bit
+```
 
 ## Building from source
 
