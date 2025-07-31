@@ -212,43 +212,25 @@ namespace breaktracer
     // Insertion candidate read search
     std::set<std::size_t> clusteredReads;
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
-      typedef boost::dynamic_bitset<> TBitSet;
-      TBitSet bp(hdr->target_len[refIndex], false);
-      TBitSet firstHit(hdr->target_len[refIndex], false);
-      TBitSet secondHit(hdr->target_len[refIndex], false);
+      typedef std::vector<uint16_t> TCounter;
+      TCounter bp(hdr->target_len[refIndex], 0);
+      uint8_t maxVal = std::numeric_limits<uint8_t>::max();
 
       // Cluster breakpoints +/-5bp
-      for(typename TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
-	if (it->second.size() > 1) {
-	  for(uint32_t i = 0; i < it->second.size(); ++i) {
-	    if (it->second[i].refidx == refIndex) {
-	      int32_t refStart = 0;
-	      if (it->second[i].refpos > 5) refStart = it->second[i].refpos - 5;
-	      int32_t refEnd = hdr->target_len[refIndex];
-	      if (it->second[i].refpos + 5 < refEnd) refEnd = it->second[i].refpos + 5;
-	      for(int32_t k = refStart; k < refEnd; ++k) {
-		if (secondHit[k]) bp[k] = true;
-		else {
-		  if (firstHit[k]) secondHit[k] = true;
-		  else firstHit[k] = true;
+      for(uint32_t z = 0; z < 2; ++z) {
+	for(typename TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
+	  if (it->second.size() > 1) {
+	    for(uint32_t i = 0; i < it->second.size(); ++i) {
+	      if (it->second[i].refidx == refIndex) {
+		for(int32_t k = std::max(0, it->second[i].refpos - 5); k < std::min((int32_t) hdr->target_len[refIndex], it->second[i].refpos + 5); ++k) {
+		  if (z) {
+		    // 2nd pass
+		    if (bp[k] >= c.minCliqueSize) clusteredReads.insert(it->first);
+		  } else {
+		    // 1st pass
+		    if (bp[k] < maxVal) ++bp[k];
+		  }
 		}
-	      }
-	    }
-	  }
-	}
-      }
-      
-      // 2nd pass to fetch reads
-      for(typename TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
-	if (it->second.size() > 1) {
-	  for(uint32_t i = 0; i < it->second.size(); ++i) {
-	    if (it->second[i].refidx == refIndex) {
-	      int32_t refStart = 0;
-	      if (it->second[i].refpos > 5) refStart = it->second[i].refpos - 5;
-	      int32_t refEnd = hdr->target_len[refIndex];
-	      if (it->second[i].refpos + 5 < refEnd) refEnd = it->second[i].refpos + 5;
-	      for(int32_t k = refStart; k < refEnd; ++k) {
-		if (bp[k]) clusteredReads.insert(it->first);
 	      }
 	    }
 	  }
