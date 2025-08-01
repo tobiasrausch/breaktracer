@@ -145,7 +145,7 @@ namespace breaktracer {
      ("help,?", "show help message")
      ("technology,y", boost::program_options::value<std::string>(&mode)->default_value("ont"), "seq. technology [pb, ont]")
      ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
-     ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "BCF output file")
+     ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "tsv output file")
      ;
    
    boost::program_options::options_description disc("Split-read options");
