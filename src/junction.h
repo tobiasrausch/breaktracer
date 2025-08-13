@@ -370,8 +370,7 @@ namespace breaktracer
     if (!clusteredReads.empty()) {
 
       // Threads
-      uint32_t maxThreads = 8;
-      ThreadPool pool(std::max<std::size_t>(1, maxThreads));
+      ThreadPool pool(std::max<std::size_t>(1, c.maxThreads));
       std::vector<std::future<void>> futures;
       std::mutex tr_mutex;
       

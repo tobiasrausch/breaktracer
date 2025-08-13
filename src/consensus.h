@@ -304,8 +304,7 @@ namespace breaktracer
     std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Local assembly" << std::endl;
 
     // Threads
-    uint32_t maxThreads = 8;
-    ThreadPool pool(std::max<std::size_t>(1, maxThreads));
+    ThreadPool pool(std::max<std::size_t>(1, c.maxThreads));
     std::vector<std::future<void>> futures;
     
     // Link clustered reads back to SV 

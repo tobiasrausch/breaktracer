@@ -38,6 +38,7 @@ namespace breaktracer {
     uint32_t graphPruning;
     uint32_t minCliqueSize;
     uint32_t maxReadPerSV;
+    uint32_t maxThreads;
     int32_t nchr;
     int32_t minSeedAlign;
     int32_t cropSize;
@@ -146,6 +147,7 @@ namespace breaktracer {
      ("technology,y", boost::program_options::value<std::string>(&mode)->default_value("ont"), "seq. technology [pb, ont]")
      ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
      ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "tsv output file")
+     ("threads,t", boost::program_options::value<uint32_t>(&c.maxThreads)->default_value(8), "number of threads")
      ;
    
    boost::program_options::options_description disc("Split-read options");
@@ -162,8 +164,8 @@ namespace breaktracer {
      ("cropsize,r", boost::program_options::value<int32_t>(&c.cropSize)->default_value(20), "leading/trailing crop size")
      ("seedlen,s", boost::program_options::value<int32_t>(&c.minSeedAlign)->default_value(130), "min. seed length")
      ("pctid,i", boost::program_options::value<float>(&c.pctThres)->default_value(0.9), "min. percent identity")
-     ("instag,t", boost::program_options::value<std::string>(&instag)->default_value("L1"), "Type of insertion [ALU|L1|SVA]")
-     ("insseq,e", boost::program_options::value<boost::filesystem::path>(&c.insseq), "FASTA with insertion sequence [overrides -t]")
+     ("instag,n", boost::program_options::value<std::string>(&instag)->default_value("L1"), "Type of insertion [ALU|L1|SVA]")
+     ("insseq,e", boost::program_options::value<boost::filesystem::path>(&c.insseq), "FASTA with insertion sequence [overrides -n]")
      ;
 
    boost::program_options::options_description hidden("Hidden options");
