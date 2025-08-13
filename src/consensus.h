@@ -414,10 +414,7 @@ namespace breaktracer
 
     // Threads
     pool.waitAll();
-    // Debug
-    for(auto& fut : futures) {
-      fut.get();
-    }
+    for(auto& fut : futures) fut.get();
       
     // Clean-up
     bam_hdr_destroy(hdr);

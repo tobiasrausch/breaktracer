@@ -368,6 +368,13 @@ namespace breaktracer
 
     // Find insertion
     if (!clusteredReads.empty()) {
+
+      // Threads
+      uint32_t maxThreads = 8;
+      ThreadPool pool(std::max<std::size_t>(1, maxThreads));
+      std::vector<std::future<void>> futures;
+      std::mutex tr_mutex;
+      
       std::vector<bam1_t*> batch;
       uint32_t batch_size = 100;
       
@@ -386,11 +393,18 @@ namespace breaktracer
 	      if (readBp[seed].size()>1) {
 		batch.push_back(bam_dup1(rec));
 		if (batch.size() == batch_size) {
-		  for(auto* srd : batch) {
-		    TraceRecord singleTR;
-		    if (process_read(c, searchseq, readBp, srd, singleTR)) tr.push_back(singleTR);
-		  }
-		  for(auto* srd : batch) bam_destroy1(srd);
+		  futures.push_back(pool.enqueue([&, batch] {
+		    std::vector<TraceRecord> local_tr;
+		    for(auto* srd : batch) {
+		      TraceRecord singleTR;
+		      if (process_read(c, searchseq, readBp, srd, singleTR)) local_tr.push_back(singleTR);
+		    }
+		    // Merge into shared vector
+		    std::lock_guard<std::mutex> lock(tr_mutex);
+		    tr.insert(tr.end(), local_tr.begin(), local_tr.end());
+		    // Clean-up
+		    for(auto* srd : batch) bam_destroy1(srd);
+		  }));
 		  batch.clear();
 		}
 	      }
@@ -401,13 +415,24 @@ namespace breaktracer
 	}
       }
       if (!batch.empty()) {
-	for(auto* srd : batch) {
-	  TraceRecord singleTR;
-	  if (process_read(c, searchseq, readBp, srd, singleTR)) tr.push_back(singleTR);
-	}
-	for(auto* srd : batch) bam_destroy1(srd);
+	futures.push_back(pool.enqueue([&, batch] {
+	  std::vector<TraceRecord> local_tr;
+	  for(auto* srd : batch) {
+	    TraceRecord singleTR;
+	    if (process_read(c, searchseq, readBp, srd, singleTR)) local_tr.push_back(singleTR);
+	  }
+	  // Merge into shared vector
+	  std::lock_guard<std::mutex> lock(tr_mutex);
+	  tr.insert(tr.end(), local_tr.begin(), local_tr.end());
+	  // Clean-up
+	  for(auto* srd : batch) bam_destroy1(srd);
+	}));
+	batch.clear();
       }
-    }
+      // Wait for threads
+      pool.waitAll();
+      for(auto& fut : futures) fut.get();
+    }    
 
     // Clean-up
     bam_hdr_destroy(hdr);
