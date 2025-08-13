@@ -303,6 +303,11 @@ namespace breaktracer
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Local assembly" << std::endl;
 
+    // Threads
+    uint32_t maxThreads = 8;
+    ThreadPool pool(std::max<std::size_t>(1, maxThreads));
+    std::vector<std::future<void>> futures;
+    
     // Link clustered reads back to SV 
     typedef std::set<std::size_t> TReadSet;
     typedef std::vector<uint32_t> TSVList; 
@@ -372,8 +377,15 @@ namespace breaktracer
 
 		// Enough split-reads?
 		if ((seqStore[svid].size() == c.maxReadPerSV) || (seqStore[svid].size() == sv[svid].seeds.size())) {
-		  if (seqStore[svid].size() > 1) msaEdlib(c, seqStore[svid], sv[svid].consensus);
-		  seqStore[svid].clear();
+		  futures.push_back(pool.enqueue([&, svid] {
+		    if (seqStore[svid].size() > 1) {
+		      std::string consensusStr;
+		      TSequences seqMSA = seqStore[svid];
+		      seqStore[svid].clear();
+		      msaEdlib(c, seqMSA, consensusStr);
+		      sv[svid].consensus = std::move(consensusStr);
+		    }
+		  }));
 		  svcons[svid] = true;
 		}
 	      }
@@ -388,9 +400,23 @@ namespace breaktracer
     // Handle left-overs
     for(uint32_t svid = 0; svid < svcons.size(); ++svid) {	
       if (!svcons[svid]) {
-	if (seqStore[svid].size() > 1) msaEdlib(c, seqStore[svid], sv[svid].consensus);
-	seqStore[svid].clear();
+	futures.push_back(pool.enqueue([&, svid] {
+	  if (seqStore[svid].size() > 1) {
+	    std::string consensusStr;
+	    TSequences seqMSA = seqStore[svid];
+	    seqStore[svid].clear();
+	    msaEdlib(c, seqMSA, consensusStr);
+	    sv[svid].consensus = std::move(consensusStr);
+	  }
+	}));
       }
+    }
+
+    // Threads
+    pool.waitAll();
+    // Debug
+    for(auto& fut : futures) {
+      fut.get();
     }
       
     // Clean-up

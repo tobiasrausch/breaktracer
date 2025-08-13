@@ -13,6 +13,7 @@
 #include <htslib/sam.h>
 
 #include "edlib.h"
+#include "threadpool.h"
 
 namespace breaktracer
 {
@@ -44,7 +45,9 @@ namespace breaktracer
     int32_t qual;
     int32_t inslen;
     std::size_t id;
-        
+
+    TraceRecord() {}
+    
     TraceRecord(int32_t const c, int32_t const p, int32_t const s, int32_t const c2, int32_t const p2, int32_t const s2, int32_t const qval, int32_t const il, std::size_t const idval) : chr(c), pos(p), seqpos(s), chr2(c2), pos2(p2), seqpos2(s2), qual(qval), inslen(il), id(idval) {}
 
     bool operator<(const TraceRecord& sv2) const {
