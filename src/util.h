@@ -51,7 +51,7 @@ namespace breaktracer
     TraceRecord(int32_t const c, int32_t const p, int32_t const s, int32_t const c2, int32_t const p2, int32_t const s2, int32_t const qval, int32_t const il, std::size_t const idval) : chr(c), pos(p), seqpos(s), chr2(c2), pos2(p2), seqpos2(s2), qual(qval), inslen(il), id(idval) {}
 
     bool operator<(const TraceRecord& sv2) const {
-      return ((chr<sv2.chr) || ((chr==sv2.chr) && (pos<sv2.pos)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2<sv2.chr2)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2==sv2.chr2) && (pos2 < sv2.pos2)));
+      return ((chr<sv2.chr) || ((chr==sv2.chr) && (pos<sv2.pos)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2<sv2.chr2)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2==sv2.chr2) && (pos2 < sv2.pos2)) || ((chr==sv2.chr) && (pos==sv2.pos) && (chr2==sv2.chr2) && (pos2 == sv2.pos2) && (id < sv2.id)));
     }
   };
 

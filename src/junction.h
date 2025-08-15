@@ -373,9 +373,7 @@ namespace breaktracer
       ThreadPool pool(std::max<std::size_t>(1, c.maxThreads));
       std::vector<std::future<void>> futures;
       std::mutex tr_mutex;
-      
       std::vector<bam1_t*> batch;
-      uint32_t batch_size = 100;
       
       // Collect reads from all samples
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
@@ -391,7 +389,7 @@ namespace breaktracer
 	    if (clusteredReads.find(seed) != clusteredReads.end()) {
 	      if (readBp[seed].size()>1) {
 		batch.push_back(bam_dup1(rec));
-		if (batch.size() == batch_size) {
+		if (batch.size() == c.batchSize) {
 		  futures.push_back(pool.enqueue([&, batch] {
 		    std::vector<TraceRecord> local_tr;
 		    for(auto* srd : batch) {

@@ -36,6 +36,7 @@ namespace breaktracer {
     uint32_t minRefSep;
     uint32_t minClip;
     uint32_t graphPruning;
+    uint32_t batchSize;
     uint32_t minCliqueSize;
     uint32_t maxReadPerSV;
     uint32_t maxThreads;
@@ -172,6 +173,7 @@ namespace breaktracer {
    hidden.add_options()
      ("input-file", boost::program_options::value< std::vector<boost::filesystem::path> >(&c.files), "input file")
      ("pruning,j", boost::program_options::value<uint32_t>(&c.graphPruning)->default_value(1000), "graph pruning cutoff")
+     ("batchsize,b", boost::program_options::value<uint32_t>(&c.batchSize)->default_value(100), "multi-threading batch size")
      ;
    
    boost::program_options::positional_options_description pos_args;
