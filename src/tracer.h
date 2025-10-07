@@ -165,7 +165,7 @@ namespace breaktracer {
      ("cropsize,r", boost::program_options::value<int32_t>(&c.cropSize)->default_value(20), "leading/trailing crop size")
      ("seedlen,s", boost::program_options::value<int32_t>(&c.minSeedAlign)->default_value(130), "min. seed length")
      ("pctid,i", boost::program_options::value<float>(&c.pctThres)->default_value(0.9), "min. percent identity")
-     ("instag,n", boost::program_options::value<std::string>(&instag)->default_value("L1"), "Type of insertion [ALU|L1|SVA]")
+     ("instag,n", boost::program_options::value<std::string>(&instag)->default_value("L1"), "Type of insertion [ALU|L1|SVA|NUMT]")
      ("insseq,e", boost::program_options::value<boost::filesystem::path>(&c.insseq), "FASTA with insertion sequence [overrides -n]")
      ;
 
@@ -283,6 +283,7 @@ namespace breaktracer {
    }
    else if (instag == "ALU") c.insmode = 1;
    else if (instag == "SVA") c.insmode = 3;
+   else if (instag == "NUMT") c.insmode = 4;
    else c.insmode = 2;
 
    // Show cmd

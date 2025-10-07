@@ -312,7 +312,8 @@ namespace breaktracer
       if (!loadSingleFasta(c, faname, searchseq)) return;
     }
     else if (c.insmode == 1) searchseq = MEI::alu;
-    else if (c.insmode ==3) searchseq = MEI::sva;
+    else if (c.insmode == 3) searchseq = MEI::sva;
+    else if (c.insmode == 4) searchseq = MEI::numt; 
     else searchseq = MEI::line1;
 
     // Augment with reverse complement
