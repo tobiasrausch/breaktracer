@@ -56,8 +56,28 @@ namespace breaktracer
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
     std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Split-read scanning" << std::endl;
 
+    // Load optional genome mask
+    faidx_t* faiMap = NULL;
+    if (c.hasGenomeMask) faiMap = fai_load(c.mask.string().c_str());
+    
     // Iterate chromosomes
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
+      // Load optional genome mask
+      typedef boost::dynamic_bitset<> TBitSet;
+      TBitSet masked;
+      char* seq = NULL;
+      if (c.hasGenomeMask) {
+	masked.resize(hdr->target_len[refIndex], false);
+	std::string tname(hdr->target_name[refIndex]);
+	int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
+	if (seqlen != - 1) {
+	  int32_t seqout = -1;
+	  seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, seqlen, &seqout);
+	  for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	    if (seq[i] == 'N') masked[i] = true;
+	  }
+	}
+      }
 
       // Collect reads from all samples
       for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
@@ -82,7 +102,9 @@ namespace breaktracer
 	      sp += bam_cigar_oplen(cigar[i]);
 	      rp += bam_cigar_oplen(cigar[i]);
 	    } else if (bam_cigar_op(cigar[i]) == BAM_CDEL) {
-	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) _insertJunction(readBp, seed, rec, rp, sp, false);
+	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) {
+		if ((!c.hasGenomeMask) || (!masked[rp])) _insertJunction(readBp, seed, rec, rp, sp, false);
+	      }
 	      rp += bam_cigar_oplen(cigar[i]);
 	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) { // Try look-ahead
 		uint32_t spOrig = sp;
@@ -108,10 +130,12 @@ namespace breaktracer
 		    spTmp += bam_cigar_oplen(cigar[j]);
 		  } else break; // No extension
 		}
-		_insertJunction(readBp, seed, rec, rp, spOrig, true);
+		if ((!c.hasGenomeMask) || (!masked[rp])) _insertJunction(readBp, seed, rec, rp, spOrig, true);
 	      }
 	    } else if (bam_cigar_op(cigar[i]) == BAM_CINS) {
-	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) _insertJunction(readBp, seed, rec, rp, sp, false);
+	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) {
+		if ((!c.hasGenomeMask) || (!masked[rp])) _insertJunction(readBp, seed, rec, rp, sp, false);
+	      }
 	      sp += bam_cigar_oplen(cigar[i]);
 	      if (bam_cigar_oplen(cigar[i]) > c.minRefSep) { // Try look-ahead
 		uint32_t rpOrig = rp;
@@ -139,7 +163,7 @@ namespace breaktracer
 		    break; // No extension
 		  }
 		}
-		_insertJunction(readBp, seed, rec, rpOrig, sp, true);
+		if ((!c.hasGenomeMask) || (!masked[rp])) _insertJunction(readBp, seed, rec, rpOrig, sp, true);
 	      }
 	    } else if (bam_cigar_op(cigar[i]) == BAM_CREF_SKIP) {
 	      rp += bam_cigar_oplen(cigar[i]);
@@ -152,7 +176,9 @@ namespace breaktracer
 	      }
 	      sp += bam_cigar_oplen(cigar[i]);
 	      //std::cerr << bam_get_qname(rec) << ',' << rp << ',' << finalsp << ',' << scleft << std::endl;
-	      if (bam_cigar_oplen(cigar[i]) > c.minClip) _insertJunction(readBp, seed, rec, rp, finalsp, scleft);
+	      if (bam_cigar_oplen(cigar[i]) > c.minClip) {
+		if ((!c.hasGenomeMask) || (!masked[rp])) _insertJunction(readBp, seed, rec, rp, finalsp, scleft);
+	      }
 	    } else {
 	      std::cerr << "Unknown Cigar options" << std::endl;
 	    }
@@ -161,12 +187,16 @@ namespace breaktracer
 	bam_destroy1(rec);
 	hts_itr_destroy(iter);
       }
+      if (c.hasGenomeMask) {
+	if (seq != NULL) free(seq);
+      }
     }
 
     // Sort junctions
     for(typename TReadBp::iterator it = readBp.begin(); it != readBp.end(); ++it) std::sort(it->second.begin(), it->second.end());
 
     // Clean-up
+    if (c.hasGenomeMask) fai_destroy(faiMap);
     bam_hdr_destroy(hdr);
     for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
       hts_idx_destroy(idx[file_c]);

@@ -30,6 +30,22 @@ BreakTracer can also be used to identify a custom FASTA sequence inserted at SV 
 
 `breaktracer find -e hpv.seq.fa -g hg38.fa input.bam > breakpoint.insertion.tsv`
 
+## Building a genome mask
+
+Sequences that are inserted but also present in the reference genome can generate complex mapping artifacts (depending on the aligner). To account for these mapping artifacts, please create a genome mask for such inserted sequences, e.g., for the standard L1 sequence:
+
+`breaktracer mask hg38.fa > hg38.L1.mask.fa`
+
+`samtools faidx hg38.L1.mask.fa`
+
+This genome mask only needs to be created once for a given sequence. The search uses the alignment edit distance and therefore takes approximately 20 hours for a human genome (~2 hours for chr1).
+
+## Running breaktracer with a genome mask
+
+To remove SV breakpoints that correspond to a region in the reference genome that matches the inserted sequence, use a pre-built genome mask.
+
+`breaktracer find -t L1 -g hg38.fa -k hg38.L1.mask.fa input.bam > breakpoint.insertion.tsv`
+
 ## License
 
 BreakTracer is free and open source (BSD). Consult the accompanying [LICENSE](https://github.com/tobiasrausch/breaktracer/blob/master/LICENSE) file for more details.

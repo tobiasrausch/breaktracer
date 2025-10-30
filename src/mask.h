@@ -32,24 +32,12 @@ namespace breaktracer {
 
   struct MaskConfig {
     uint16_t insmode;
-    uint16_t minMapQual;
-    uint32_t minRefSep;
-    uint32_t minClip;
-    uint32_t graphPruning;
-    uint32_t batchSize;
-    uint32_t minCliqueSize;
-    uint32_t maxReadPerSV;
-    uint32_t maxThreads;
     int32_t nchr;
     int32_t minSeedAlign;
-    int32_t cropSize;
     float pctThres;
-    float indelExtension;
     boost::filesystem::path outfile;
-    std::vector<boost::filesystem::path> files;
     boost::filesystem::path genome;
     boost::filesystem::path insseq;
-    std::vector<std::string> sampleName;
   };
   
   template<typename TConfig>
@@ -59,7 +47,88 @@ namespace breaktracer {
 #ifdef PROFILE
     ProfilerStart("tracer.prof");
 #endif
+
+    // Open output file
+    std::streambuf * buf;
+    std::ofstream of;
+    if(c.outfile.string() != "-") {
+      of.open(c.outfile.string().c_str());
+      buf = of.rdbuf();
+    } else {
+      buf = std::cout.rdbuf();
+    }
+    std::ostream out(buf);
+
+    // Max edit distance
+    int maxEdit = std::max((int) ((1.0 - c.pctThres) * c.minSeedAlign), 1);
     
+    // Generate search probe
+    std::string searchseq;
+    if (c.insmode == 0) {
+      std::string faname = "";
+      if (!loadSingleFasta(c, faname, searchseq)) return 1;
+    }
+    else if (c.insmode == 1) searchseq = MEI::alu;
+    else if (c.insmode == 3) searchseq = MEI::sva;
+    else if (c.insmode == 4) searchseq = MEI::numt;
+    else searchseq = MEI::line1;
+    // Augment with reverse complement
+    std::string revseq = searchseq;
+    reverseComplement(revseq);
+    searchseq += revseq;
+
+    // Iterate chromosomes
+    faidx_t* fai = fai_load(c.genome.string().c_str());
+    std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] " << "Mask reference" << std::endl;
+
+    for(int32_t refIndex = 0; refIndex < c.nchr; ++refIndex) {
+      // Load chromosome
+      std::string seqname(faidx_iseq(fai, refIndex));
+      int32_t sql = faidx_seq_len(fai, seqname.c_str());
+      int32_t seqlen = -1;
+      char* seq = faidx_fetch_seq(fai, seqname.c_str(), 0, sql, &seqlen);
+
+      // Search for hits
+      if (c.minSeedAlign < sql) {
+	// Hit mask
+	typedef boost::dynamic_bitset<> TBitSet;
+	TBitSet masked(sql, false);
+
+	// Output mask
+	out << '>' << seqname << std::endl;
+
+	// Parse chromosome
+	uint32_t ac = 0;
+	uint32_t ahit = 0;
+	for(int32_t pos = 0; pos + c.minSeedAlign < sql; pos += maxEdit) {
+	  std::string refseq = boost::to_upper_copy(std::string(seq + pos, seq + pos + c.minSeedAlign));
+	  EdlibAlignResult cigarFull = edlibAlign(refseq.c_str(), refseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(maxEdit, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	  if ((cigarFull.status == EDLIB_STATUS_OK) && (cigarFull.editDistance != -1)) {
+	    double pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (c.minSeedAlign) );
+	    if (pIdFull > c.pctThres) {
+	      //printAlignment(refseq, searchseq, EDLIB_MODE_HW, cigarFull);
+	      for(int32_t k = pos; k < pos + c.minSeedAlign; ++k) masked[k] = true;
+	      ++ahit;
+	    }
+	  }
+	  edlibFreeAlignResult(cigarFull);
+	  ++ac;
+        }
+	for(int32_t pos = 0; pos < sql; ++pos) {
+	  if ((pos) && (pos % 60 == 0)) out << '\n';
+	  if (masked[pos]) out << 'N';
+	  else out << 'A';
+	}
+	out << '\n';
+
+	// Summary stats
+	double hitpct = ((double)(ahit) * 100.0) / (double)(ac);
+	std::cerr << '[' << boost::posix_time::to_simple_string(boost::posix_time::second_clock::local_time()) << "] " << "Processed " << seqname << " with " << ac << " alignments and " << ahit << " sequence hits (" << hitpct << "%)" << std::endl;
+      }
+    }
+    // Clean-up
+    fai_destroy(fai);
+    if(c.outfile.string() != "-") of.close();
    
 #ifdef PROFILE
     ProfilerStop();
@@ -128,6 +197,7 @@ namespace breaktracer {
 	 return 1;
        } else fai = fai_load(c.genome.string().c_str());
      }
+     c.nchr = faidx_nseq(fai);
      fai_destroy(fai);
    }
    

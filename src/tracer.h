@@ -31,6 +31,7 @@ namespace breaktracer {
 
 
   struct TracerConfig {
+    bool hasGenomeMask;
     uint16_t insmode;
     uint16_t minMapQual;
     uint32_t minRefSep;
@@ -48,6 +49,7 @@ namespace breaktracer {
     boost::filesystem::path outfile;
     std::vector<boost::filesystem::path> files;
     boost::filesystem::path genome;
+    boost::filesystem::path mask;
     boost::filesystem::path insseq;
     std::vector<std::string> sampleName;
   };
@@ -162,6 +164,7 @@ namespace breaktracer {
 
    boost::program_options::options_description brin("Breakpoint insertion options");
    brin.add_options()
+     ("mask,k", boost::program_options::value<boost::filesystem::path>(&c.mask), "genome mask")
      ("cropsize,r", boost::program_options::value<int32_t>(&c.cropSize)->default_value(20), "leading/trailing crop size")
      ("seedlen,s", boost::program_options::value<int32_t>(&c.minSeedAlign)->default_value(130), "min. seed length")
      ("pctid,i", boost::program_options::value<float>(&c.pctThres)->default_value(0.9), "min. percent identity")
@@ -261,6 +264,10 @@ namespace breaktracer {
    }
    checkSampleNames(c);
 
+   // Genome mask
+   if (vm.count("mask")) c.hasGenomeMask = true;
+   else c.hasGenomeMask = false;
+   
    // Check outfile
    if (!vm.count("outfile")) c.outfile = "-";
    else {
