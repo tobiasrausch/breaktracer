@@ -15,6 +15,7 @@
 
 #include "version.h"
 #include "tracer.h"
+#include "mask.h"
 
 using namespace breaktracer;
 
@@ -23,6 +24,7 @@ inline void
 displayUsage() {
   std::cerr << "Usage: breaktracer <command> <arguments>" << std::endl;
   std::cerr << std::endl;
+  std::cerr << "    mask        create a genome mask" << std::endl;
   std::cerr << "    find        trace inserted sequence fragment" << std::endl;
   std::cerr << std::endl;
 }
@@ -52,6 +54,9 @@ int main(int argc, char **argv) {
     else if ((std::string(argv[1]) == "license") || (std::string(argv[1]) == "--license") || (std::string(argv[1]) == "-l")) {
       bsd();
       return 0;
+    }
+    else if ((std::string(argv[1]) == "mask")) {
+      return mask(argc-1,argv+1);
     }
     else if ((std::string(argv[1]) == "find")) {
       return tracer(argc-1,argv+1);
