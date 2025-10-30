@@ -38,7 +38,7 @@ Sequences that are inserted but also present in the reference genome can generat
 
 `samtools faidx hg38.L1.mask.fa`
 
-This genome mask only needs to be created once for a given sequence. The search uses the alignment edit distance and therefore takes approximately ~10 hours for a human genome.
+This genome mask only needs to be created once for a given reference genome. The search uses the alignment edit distance and therefore takes approximately ~10 hours for a human genome.
 
 ## Running breaktracer with a genome mask
 
