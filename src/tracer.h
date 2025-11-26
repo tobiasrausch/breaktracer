@@ -53,10 +53,126 @@ namespace breaktracer {
     boost::filesystem::path insseq;
     std::vector<std::string> sampleName;
   };
+
+  struct BpHomology {
+    int32_t posLeft;
+    int32_t posRight;
+    int32_t pos2Left;
+    int32_t pos2Right;
+
+    BpHomology() : posLeft(-1), posRight(-1), pos2Left(-1), pos2Right(-1) {}
+  };
+
+  template<typename TConfig>
+  inline void
+  annotateHomology(TConfig const& c, bam_hdr_t* hdr, faidx_t* fai, char const* seq, std::string const& searchseq, BrInTrace const& sv, BpHomology& bphom) {
+    // Left homology length (pos)
+    int minHomLen = 50;
+    while (minHomLen) {
+      if ((sv.pos >= minHomLen) && (sv.pos + minHomLen <= (int) hdr->target_len[sv.chr])) {
+	std::string refseq = boost::to_upper_copy(std::string(seq + sv.pos - minHomLen, seq + sv.pos));
+	EdlibAlignResult cigar = edlibAlign(refseq.c_str(), refseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (refseq.size()) );
+	edlibFreeAlignResult(cigar);
+	if (pId > c.pctThres) {
+	  bphom.posLeft = minHomLen;
+	  minHomLen += 10;
+	} else break;
+      } else break;
+    }
+
+    // Right homology length (pos)
+    minHomLen = 50;
+    while (minHomLen) {
+      if ((sv.pos >= minHomLen) && (sv.pos + minHomLen <= (int) hdr->target_len[sv.chr])) {
+	std::string refseq = boost::to_upper_copy(std::string(seq + sv.pos, seq + sv.pos + minHomLen));
+	EdlibAlignResult cigar = edlibAlign(refseq.c_str(), refseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (refseq.size()) );
+	edlibFreeAlignResult(cigar);
+	if (pId > c.pctThres) {
+	  bphom.posRight = minHomLen;
+	  minHomLen += 10;
+	} else break;
+      } else break;
+    }
+
+    // Left homology length (pos2)
+    minHomLen = 50;
+    while (minHomLen) {
+      std::string refseq;
+      if ((sv.pos2 >= minHomLen) && (sv.pos2 + minHomLen <= (int) hdr->target_len[sv.chr2])) {
+	if (sv.chr == sv.chr2) refseq = boost::to_upper_copy(std::string(seq + sv.pos2 - minHomLen, seq + sv.pos2));
+	else {
+	  // Different chromosome
+	  int32_t seqlen = -1;
+	  std::string chrom(hdr->target_name[sv.chr2]);
+	  char* locseq = NULL;
+	  locseq = faidx_fetch_seq(fai, chrom.c_str(), sv.pos2 - minHomLen, sv.pos2, &seqlen);
+	  refseq = std::string(locseq);
+	  if (locseq != NULL) free(locseq);
+	}
+      }
+      if (!refseq.empty()) {
+	EdlibAlignResult cigar = edlibAlign(refseq.c_str(), refseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (refseq.size()) );
+	edlibFreeAlignResult(cigar);
+	if (pId > c.pctThres) {
+	  bphom.pos2Left = minHomLen;
+	  minHomLen += 10;
+	} else break;
+      } else break;
+    }
+
+    // Right homology length (pos2)
+    minHomLen = 50;
+    while (minHomLen) {
+      std::string refseq;
+      if ((sv.pos2 >= minHomLen) && (sv.pos2 + minHomLen <= (int) hdr->target_len[sv.chr2])) {
+	if (sv.chr == sv.chr2) refseq = boost::to_upper_copy(std::string(seq + sv.pos2, seq + sv.pos2 + minHomLen));
+	else {
+	  // Different chromosome
+	  int32_t seqlen = -1;
+	  std::string chrom(hdr->target_name[sv.chr2]);
+	  char* locseq = NULL;
+	  locseq = faidx_fetch_seq(fai, chrom.c_str(), sv.pos2, sv.pos2 + minHomLen, &seqlen);
+	  refseq = std::string(locseq);
+	  if (locseq != NULL) free(locseq);
+	}
+      }
+      if (!refseq.empty()) {
+	EdlibAlignResult cigar = edlibAlign(refseq.c_str(), refseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (refseq.size()) );
+	edlibFreeAlignResult(cigar);
+	if (pId > c.pctThres) {
+	  bphom.pos2Right = minHomLen;
+	  minHomLen += 10;
+	} else break;
+      } else break;
+    }
+  }
   
   template<typename TConfig>
   inline void
   output(TConfig const& c, std::vector<BrInTrace>& sv) {
+    // Sort by chromosome
+    std::sort(sv.begin(), sv.end());
+
+    // Load sequence
+    std::string searchseq;
+    if (c.insmode == 0) {
+      std::string faname = "";
+      if (!loadSingleFasta(c, faname, searchseq)) return;
+    }
+    else if (c.insmode == 1) searchseq = MEI::alu;
+    else if (c.insmode == 3) searchseq = MEI::sva;
+    else if (c.insmode == 4) searchseq = MEI::numt; 
+    else searchseq = MEI::line1;
+
+    // Augment with reverse complement
+    std::string revseq = searchseq;
+    reverseComplement(revseq);
+    searchseq += revseq;
+    
     // Open output file
     std::streambuf * buf;
     std::ofstream of;
@@ -67,15 +183,30 @@ namespace breaktracer {
       buf = std::cout.rdbuf();
     }
     std::ostream out(buf);
-    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence" << std::endl;
+    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen" << std::endl;
 
     // Open file handles
     samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
     hts_set_fai_filename(samfile, c.genome.string().c_str());
     hts_idx_t* idx = sam_index_load(samfile, c.files[0].string().c_str());
     bam_hdr_t* hdr = sam_hdr_read(samfile);
-
+    faidx_t* fai = fai_load(c.genome.string().c_str());
+    char* seq = NULL;
+    int lastIdx = -1;
     for(uint32_t i = 0; i < sv.size(); ++i) {
+      // Lazy loading of reference genome
+      if (sv[i].chr != lastIdx) {
+	if (seq != NULL) {
+	  free(seq);
+	  seq = NULL;
+	}
+	int32_t seqlen = -1;
+	std::string chrom(hdr->target_name[sv[i].chr]);
+	seq = faidx_fetch_seq(fai, chrom.c_str(), 0, hdr->target_len[sv[i].chr], &seqlen);
+	lastIdx = sv[i].chr;
+      }
+
+      // Output insertions
       std::string padNumber = boost::lexical_cast<std::string>(i);
       padNumber.insert(padNumber.begin(), 8 - padNumber.length(), '0');
       out << "BRINS" << padNumber << '\t';
@@ -91,9 +222,16 @@ namespace breaktracer {
       else out << "PlainInsertion";
       out << '\t';
       out << sv[i].consensus.size() << '\t';
-      out << sv[i].consensus;
-      out << std::endl;
+      out << sv[i].consensus << '\t';
+
+      // Annotate homology
+      BpHomology homlen;
+      annotateHomology(c, hdr, fai, seq, searchseq, sv[i], homlen);
+      out << homlen.posLeft << ',' << homlen.posRight << '\t';
+      out << homlen.pos2Left << ',' << homlen.pos2Right << std::endl;
     }
+    if (seq != NULL) free(seq);
+    fai_destroy(fai);
     
     // Clean-up
     bam_hdr_destroy(hdr);
@@ -123,7 +261,7 @@ namespace breaktracer {
 
    // Assemble
    assemble(c, tr, sv);
-   
+
    // Output
    output(c, sv);
    

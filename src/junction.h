@@ -365,7 +365,7 @@ namespace breaktracer
     
     // Parse genome chr-by-chr
     boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Insertion serach" << std::endl;
+    std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Insertion search" << std::endl;
 
     // Insertion candidate read search
     std::set<std::size_t> clusteredReads;
