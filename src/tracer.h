@@ -208,22 +208,34 @@ namespace breaktracer {
 	    int32_t halfLen = searchseq.size() / 2;
 	    if (ianno.insStart >= halfLen) {
 	      ianno.isRC = true;
-	      ianno.insStart -= halfLen;
-	      ianno.insEnd -= halfLen;
+	      int32_t rcStart = ianno.insStart - halfLen;
+	      int32_t rcEnd = ianno.insEnd - halfLen;
+	      ianno.insStart = halfLen - 1 - rcEnd;
+	      ianno.insEnd = halfLen - 1 - rcStart;
 	    }
-	    	    // Any transductions?
+	    // Any transductions?
             std::string meiSeq = searchseq.substr(ianno.isRC ? halfLen : 0, halfLen);
             EdlibAlignResult trRes = edlibAlign(meiSeq.c_str(), meiSeq.size(), consBody.c_str(), consBody.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
             if ((trRes.status == EDLIB_STATUS_OK) && (trRes.numLocations > 0)) {
 	      int32_t matchStart = trRes.startLocations[0];
 	      int32_t matchEnd = trRes.endLocations[0];
 	      if (matchStart > 30) {
-		ianno.td5Len = matchStart;
-		ianno.td5Seq = consBody.substr(0, matchStart);
+		if (ianno.isRC) {
+		  ianno.td3Len = matchStart;
+		  ianno.td3Seq = consBody.substr(0, matchStart);
+		} else {
+		  ianno.td5Len = matchStart;
+		  ianno.td5Seq = consBody.substr(0, matchStart);
+		}
 	      }
 	      if (matchEnd < (int)consBody.size() - 31) {
-		ianno.td3Len = (int)consBody.size() - 1 - matchEnd;
-		ianno.td3Seq = consBody.substr(matchEnd + 1);
+		if (ianno.isRC) {
+		  ianno.td5Len = (int)consBody.size() - 1 - matchEnd;
+		  ianno.td5Seq = consBody.substr(matchEnd + 1);
+		} else {
+		  ianno.td3Len = (int)consBody.size() - 1 - matchEnd;
+		  ianno.td3Seq = consBody.substr(matchEnd + 1);
+		}
 	      }
 	      edlibFreeAlignResult(trRes);
             }
