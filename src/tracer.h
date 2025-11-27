@@ -55,28 +55,23 @@ namespace breaktracer {
   };
 
   struct InsAnno {
-    // Breakpoint homology
-    int32_t posLeft;
+    bool isRC;
+    int32_t posLeft;  // Breakpoint homology
     int32_t posRight;
     int32_t pos2Left;
     int32_t pos2Right;
-
-    // Insertion annotation
-    int32_t polyT;
-    int32_t polyA;
-    int32_t insStart;
+    int32_t polyT;  // poly-T
+    int32_t polyA;  // poly-A
+    int32_t insStart;  // coordinates with respect to search seq
     int32_t insEnd;
-    bool isRC;
+    int32_t td5Len; // transduction
+    int32_t td3Len;
     float consId;
     std::string cigar;
-
-    // Transduction
-    int32_t td5Len;
-    int32_t td3Len;
     std::string td5Seq;
     std::string td3Seq;
     
-    InsAnno() : posLeft(-1), posRight(-1), pos2Left(-1), pos2Right(-1), polyT(0), polyA(0), insStart(-1), insEnd(-1), isRC(false), consId(0), cigar("*"), td5Len(0), td3Len(0), td5Seq("*"), td3Seq("*") {}
+    InsAnno() : isRC(false), posLeft(0), posRight(0), pos2Left(0), pos2Right(0), polyT(0), polyA(0), insStart(0), insEnd(0), td5Len(0), td3Len(0), consId(0), cigar("*"), td5Seq("*"), td3Seq("*") {}
   };
 
   inline int32_t
@@ -191,60 +186,84 @@ namespace breaktracer {
 
     // Characterize insertion sequence
     if (!sv.consensus.empty()) {
-      ianno.polyA = estimatePolyTail(sv.consensus, true);
-      ianno.polyT = estimatePolyTail(sv.consensus, false);
-      
-      // Align trimmed consensus
-      int32_t cstart = ianno.polyT;
-      int32_t cend = (int32_t) sv.consensus.size() - ianno.polyA;
-      if (cend > cstart) {
-	std::string consBody = sv.consensus.substr(cstart, cend - cstart);
-	EdlibAlignResult res = edlibAlign(consBody.c_str(), consBody.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
-	if (res.status == EDLIB_STATUS_OK) {
-	  ianno.consId = 1.0 - ( (double) (res.editDistance) / (double) (consBody.size()) );
-	  if (res.numLocations > 0) {
-	    ianno.insStart = res.startLocations[0];
-	    ianno.insEnd = res.endLocations[0];
-	    int32_t halfLen = searchseq.size() / 2;
-	    if (ianno.insStart >= halfLen) {
-	      ianno.isRC = true;
-	      int32_t rcStart = ianno.insStart - halfLen;
-	      int32_t rcEnd = ianno.insEnd - halfLen;
-	      ianno.insStart = halfLen - 1 - rcEnd;
-	      ianno.insEnd = halfLen - 1 - rcStart;
-	    }
-	    // Any transductions?
-            std::string meiSeq = searchseq.substr(ianno.isRC ? halfLen : 0, halfLen);
-            EdlibAlignResult trRes = edlibAlign(meiSeq.c_str(), meiSeq.size(), consBody.c_str(), consBody.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
-            if ((trRes.status == EDLIB_STATUS_OK) && (trRes.numLocations > 0)) {
-	      int32_t matchStart = trRes.startLocations[0];
-	      int32_t matchEnd = trRes.endLocations[0];
-	      if (matchStart > 30) {
-		if (ianno.isRC) {
-		  ianno.td3Len = matchStart;
-		  ianno.td3Seq = consBody.substr(0, matchStart);
-		} else {
-		  ianno.td5Len = matchStart;
-		  ianno.td5Seq = consBody.substr(0, matchStart);
-		}
-	      }
-	      if (matchEnd < (int)consBody.size() - 31) {
-		if (ianno.isRC) {
-		  ianno.td5Len = (int)consBody.size() - 1 - matchEnd;
-		  ianno.td5Seq = consBody.substr(matchEnd + 1);
-		} else {
-		  ianno.td3Len = (int)consBody.size() - 1 - matchEnd;
-		  ianno.td3Seq = consBody.substr(matchEnd + 1);
-		}
-	      }
-	      edlibFreeAlignResult(trRes);
-            }
+      // Forward or reverse?
+      int32_t halfLen = searchseq.size() / 2;
+      std::string fwdseq = searchseq.substr(0, halfLen);
+      double fwdId = 0.0;
+      std::string revseq = searchseq.substr(halfLen, halfLen);
+      double revId = 0.0;
+      EdlibAlignResult resFwd = edlibAlign(sv.consensus.c_str(), sv.consensus.size(), fwdseq.c_str(), fwdseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
+      if (resFwd.status == EDLIB_STATUS_OK) fwdId = 1.0 - ( (double) (resFwd.editDistance) / (double) (sv.consensus.size()) );
+      EdlibAlignResult resRev = edlibAlign(sv.consensus.c_str(), sv.consensus.size(), revseq.c_str(), revseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
+      if (resRev.status == EDLIB_STATUS_OK) revId = 1.0 - ( (double) (resRev.editDistance) / (double) (sv.consensus.size()) );
+      if (fwdId > revId) ianno.isRC = false;
+      else ianno.isRC = true;
+      edlibFreeAlignResult(resFwd);
+      edlibFreeAlignResult(resRev);
+
+      // Any transductions?
+      std::string meiSeq;
+      if (ianno.isRC) meiSeq = revseq;
+      else meiSeq = fwdseq;
+      int32_t matchStart = 0;
+      int32_t matchEnd = sv.consensus.size();
+      EdlibAlignResult trRes = edlibAlign(meiSeq.c_str(), meiSeq.size(), sv.consensus.c_str(), sv.consensus.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
+      if ((trRes.status == EDLIB_STATUS_OK) && (trRes.numLocations > 0)) {
+	matchStart = trRes.startLocations[0];
+	matchEnd = trRes.endLocations[0];
+	if (matchStart > 30) {
+	  if (ianno.isRC) {
+	    ianno.td3Len = matchStart;
+	    ianno.td3Seq = sv.consensus.substr(0, matchStart);
+	  } else {
+	    ianno.td5Len = matchStart;
+	    ianno.td5Seq = sv.consensus.substr(0, matchStart);
 	  }
-	  char* cig = edlibAlignmentToCigar(res.alignment, res.alignmentLength, EDLIB_CIGAR_STANDARD);
-	  ianno.cigar = std::string(cig);
-	  free(cig);
 	}
-	edlibFreeAlignResult(res);
+	if (matchEnd < (int) sv.consensus.size() - 31) {
+	  if (ianno.isRC) {
+	    ianno.td5Len = (int) sv.consensus.size() - 1 - matchEnd;
+	    ianno.td5Seq = sv.consensus.substr(matchEnd + 1);
+	  } else {
+	    ianno.td3Len = (int) sv.consensus.size() - 1 - matchEnd;
+	    ianno.td3Seq = sv.consensus.substr(matchEnd + 1);
+	  }
+	}
+      }
+      edlibFreeAlignResult(trRes);
+
+      // Do proper alignment calculation without transductions
+      std::string consBody = sv.consensus.substr(matchStart, (matchEnd - matchStart));
+      if (!consBody.empty()) {
+
+	// Get poly-A and poly-T length
+	ianno.polyA = estimatePolyTail(consBody, true);
+	ianno.polyT = estimatePolyTail(consBody, false);
+
+	// Align trimmed consensus
+	int32_t cstart = ianno.polyT;
+	int32_t cend = (int32_t) consBody.size() - ianno.polyA;
+	if (cend > cstart) {
+	  consBody = consBody.substr(cstart, cend - cstart);
+	  if (!consBody.empty()) {
+	    EdlibAlignResult res = edlibAlign(consBody.c_str(), consBody.size(), meiSeq.c_str(), meiSeq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
+	    if (res.status == EDLIB_STATUS_OK) {
+	      ianno.consId = 1.0 - ( (double) (res.editDistance) / (double) (consBody.size()) );
+	      if (res.numLocations > 0) {
+		if (ianno.isRC) {
+		  ianno.insStart = halfLen - 1 - res.endLocations[0];
+		  ianno.insEnd = halfLen - 1 - res.startLocations[0];
+		} else {
+		  ianno.insStart = res.startLocations[0];
+		  ianno.insEnd = res.endLocations[0];
+		}
+	      }
+	    }
+	    char* cig = edlibAlignmentToCigar(res.alignment, res.alignmentLength, EDLIB_CIGAR_STANDARD);
+	    ianno.cigar = std::string(cig);
+	    free(cig);
+	  }
+	}
       }
     }
   }
@@ -281,7 +300,7 @@ namespace breaktracer {
       buf = std::cout.rdbuf();
     }
     std::ostream out(buf);
-    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqRC\tInsIdentity\tInsCigar\tTd5Len\tTd5Seq\tTd3Len\tTd3Seq" << std::endl;
+    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqStrand\tInsSeqIdentity\tInsSeqCigar\tTd5Len\tTd5Seq\tTd3Len\tTd3Seq" << std::endl;
 
     // Open file handles
     samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
@@ -325,9 +344,13 @@ namespace breaktracer {
       // Insertion annotation
       InsAnno ianno;
       annotateHomology(c, hdr, fai, seq, searchseq, sv[i], ianno);
+      char strand = '+';
+      if (ianno.isRC) strand = '-';
+
+      // Output
       out << ianno.posLeft << ',' << ianno.posRight << '\t';
       out << ianno.pos2Left << ',' << ianno.pos2Right << '\t';
-      out << ianno.polyT << '\t' << ianno.polyA << '\t' << ianno.insStart << '\t' << ianno.insEnd << '\t' << ianno.isRC << '\t' << ianno.consId << '\t' << ianno.cigar << '\t';
+      out << ianno.polyT << '\t' << ianno.polyA << '\t' << ianno.insStart << '\t' << ianno.insEnd << '\t' << strand << '\t' << ianno.consId << '\t' << ianno.cigar << '\t';
       out << ianno.td5Len << '\t' << ianno.td5Seq << '\t' << ianno.td3Len << '\t' << ianno.td3Seq << std::endl;
     }
     if (seq != NULL) free(seq);
