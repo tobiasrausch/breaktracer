@@ -56,6 +56,8 @@ namespace breaktracer {
 
   struct InsAnno {
     bool isRC;
+    bool td3Inv;
+    bool td5Inv;
     int32_t posLeft;  // Breakpoint homology
     int32_t posRight;
     int32_t pos2Left;
@@ -71,7 +73,7 @@ namespace breaktracer {
     std::string td5Seq;
     std::string td3Seq;
     
-    InsAnno() : isRC(false), posLeft(0), posRight(0), pos2Left(0), pos2Right(0), polyT(0), polyA(0), insStart(0), insEnd(0), td5Len(0), td3Len(0), consId(0), cigar("*"), td5Seq("*"), td3Seq("*") {}
+    InsAnno() : isRC(false), td3Inv(false), td5Inv(false), posLeft(0), posRight(0), pos2Left(0), pos2Right(0), polyT(0), polyA(0), insStart(0), insEnd(0), td5Len(0), td3Len(0), consId(0), cigar("*"), td5Seq("*"), td3Seq("*") {}
   };
 
   inline int32_t
@@ -80,21 +82,31 @@ namespace breaktracer {
     int32_t matches = 0;
     int32_t total = 0;
     if (checkPolyA) {
-      for (int i = seq.size() - 1; i >= 0; --i) {
-        if (seq[i] == 'A') ++matches;
-        ++total;
-        if ((float) matches / (float) total >= minIdentity) len = total;
-	else if ((total > 10) && ((float) matches / (float) total < 0.8)) break;
-      }
-    } else {
       for (size_t i = 0; i < seq.size(); ++i) {
-        if (seq[i] == 'T') ++matches;
+        if (seq[i] == 'A') ++matches;
         ++total;
 	if ((float) matches / (float) total >= minIdentity) len = total;
 	else if ((total > 10) && ((float) matches / (float) total < 0.8)) break;
       }
+    } else { 
+      for (int i = seq.size() - 1; i >= 0; --i) {
+        if (seq[i] == 'T') ++matches;
+        ++total;
+        if ((float) matches / (float) total >= minIdentity) len = total;
+	else if ((total > 10) && ((float) matches / (float) total < 0.8)) break;
+      }
     }
     return len;
+  }
+
+  template<typename TConfig>
+  inline bool
+  checkForInversion(TConfig const& c, std::string const& seq5, std::string const& meiseq) {
+    EdlibAlignResult invRes = edlibAlign(seq5.c_str(), seq5.size(), meiseq.c_str(), meiseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+    double invId = 1.0 - ((double)invRes.editDistance / (double)seq5.size());
+    edlibFreeAlignResult(invRes);
+    if (invId > c.pctThres) return true;
+    else return false;
   }
   
   template<typename TConfig>
@@ -203,30 +215,52 @@ namespace breaktracer {
 
       // Any transductions?
       std::string meiSeq;
-      if (ianno.isRC) meiSeq = revseq;
-      else meiSeq = fwdseq;
+      if (ianno.isRC) {
+	meiSeq = revseq;
+	if ((c.insmode > 0) && (c.insmode < 4)) meiSeq = meiSeq.substr(MEI::polyA.size()); // Trim poly-T
+      } else {
+	meiSeq = fwdseq;
+	if ((c.insmode > 0) && (c.insmode < 4)) meiSeq = meiSeq.substr(0, meiSeq.size() - MEI::polyA.size()); // Trim poly-A
+      }
       int32_t matchStart = 0;
       int32_t matchEnd = sv.consensus.size();
       EdlibAlignResult trRes = edlibAlign(meiSeq.c_str(), meiSeq.size(), sv.consensus.c_str(), sv.consensus.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
+      printAlignment(meiSeq, sv.consensus, EDLIB_MODE_HW, trRes);
       if ((trRes.status == EDLIB_STATUS_OK) && (trRes.numLocations > 0)) {
 	matchStart = trRes.startLocations[0];
 	matchEnd = trRes.endLocations[0];
-	if (matchStart > 30) {
+	if (matchStart > 10) {
+	  std::string seq5 = sv.consensus.substr(0, matchStart);
 	  if (ianno.isRC) {
-	    ianno.td3Len = matchStart;
-	    ianno.td3Seq = sv.consensus.substr(0, matchStart);
+	    ianno.polyT = estimatePolyTail(seq5, false); // poly-T
+	    seq5 = seq5.substr(0, seq5.size() - ianno.polyT);
+	    if (seq5.size() > 10) {
+	      ianno.td3Inv = checkForInversion(c, seq5, fwdseq);
+	      ianno.td3Len = seq5.size();
+	      ianno.td3Seq = seq5;
+	    }
 	  } else {
-	    ianno.td5Len = matchStart;
-	    ianno.td5Seq = sv.consensus.substr(0, matchStart);
+	    ianno.polyA = estimatePolyTail(seq5, true); // poly-A
+	    seq5 = seq5.substr(ianno.polyA);
+	    if (seq5.size() > 10) {
+	      ianno.td5Inv = checkForInversion(c, seq5, revseq);
+	      ianno.td5Len = seq5.size();
+	      ianno.td5Seq = seq5;
+	    }
 	  }
 	}
-	if (matchEnd < (int) sv.consensus.size() - 31) {
+	if (matchEnd < (int) sv.consensus.size() - 11) {
+	  std::string seq5 = sv.consensus.substr(matchEnd + 1);
 	  if (ianno.isRC) {
+	    ianno.polyT = estimatePolyTail(seq5, false); // poly-T
+	    ianno.td5Inv = checkForInversion(c, seq5, fwdseq);
 	    ianno.td5Len = (int) sv.consensus.size() - 1 - matchEnd;
-	    ianno.td5Seq = sv.consensus.substr(matchEnd + 1);
+	    ianno.td5Seq = seq5;
 	  } else {
+	    ianno.polyA = estimatePolyTail(seq5, true); // poly-A
+	    ianno.td3Inv = checkForInversion(c, seq5, revseq);
 	    ianno.td3Len = (int) sv.consensus.size() - 1 - matchEnd;
-	    ianno.td3Seq = sv.consensus.substr(matchEnd + 1);
+	    ianno.td3Seq = seq5;
 	  }
 	}
       }
@@ -235,35 +269,22 @@ namespace breaktracer {
       // Do proper alignment calculation without transductions
       std::string consBody = sv.consensus.substr(matchStart, (matchEnd - matchStart));
       if (!consBody.empty()) {
-
-	// Get poly-A and poly-T length
-	ianno.polyA = estimatePolyTail(consBody, true);
-	ianno.polyT = estimatePolyTail(consBody, false);
-
-	// Align trimmed consensus
-	int32_t cstart = ianno.polyT;
-	int32_t cend = (int32_t) consBody.size() - ianno.polyA;
-	if (cend > cstart) {
-	  consBody = consBody.substr(cstart, cend - cstart);
-	  if (!consBody.empty()) {
-	    EdlibAlignResult res = edlibAlign(consBody.c_str(), consBody.size(), meiSeq.c_str(), meiSeq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
-	    if (res.status == EDLIB_STATUS_OK) {
-	      ianno.consId = 1.0 - ( (double) (res.editDistance) / (double) (consBody.size()) );
-	      if (res.numLocations > 0) {
-		if (ianno.isRC) {
-		  ianno.insStart = halfLen - 1 - res.endLocations[0];
-		  ianno.insEnd = halfLen - 1 - res.startLocations[0];
-		} else {
-		  ianno.insStart = res.startLocations[0];
-		  ianno.insEnd = res.endLocations[0];
-		}
-	      }
+	EdlibAlignResult res = edlibAlign(consBody.c_str(), consBody.size(), meiSeq.c_str(), meiSeq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
+	if (res.status == EDLIB_STATUS_OK) {
+	  ianno.consId = 1.0 - ( (double) (res.editDistance) / (double) (consBody.size()) );
+	  if (res.numLocations > 0) {
+	    if (ianno.isRC) {
+	      ianno.insStart = meiSeq.size() - 1 - res.endLocations[0];
+	      ianno.insEnd = meiSeq.size() - 1 - res.startLocations[0];
+	    } else {
+	      ianno.insStart = res.startLocations[0];
+	      ianno.insEnd = res.endLocations[0];
 	    }
-	    char* cig = edlibAlignmentToCigar(res.alignment, res.alignmentLength, EDLIB_CIGAR_STANDARD);
-	    ianno.cigar = std::string(cig);
-	    free(cig);
 	  }
 	}
+	char* cig = edlibAlignmentToCigar(res.alignment, res.alignmentLength, EDLIB_CIGAR_STANDARD);
+	ianno.cigar = std::string(cig);
+	free(cig);
       }
     }
   }
@@ -279,12 +300,14 @@ namespace breaktracer {
     if (c.insmode == 0) {
       std::string faname = "";
       if (!loadSingleFasta(c, faname, searchseq)) return;
+    } else {
+      if (c.insmode == 1) searchseq = MEI::alu;
+      else if (c.insmode == 3) searchseq = MEI::sva;
+      else if (c.insmode == 4) searchseq = MEI::numt; 
+      else searchseq = MEI::line1;
+      // Add poly-A for MEIs
+      if (c.insmode != 4) searchseq += MEI::polyA;
     }
-    else if (c.insmode == 1) searchseq = MEI::alu;
-    else if (c.insmode == 3) searchseq = MEI::sva;
-    else if (c.insmode == 4) searchseq = MEI::numt; 
-    else searchseq = MEI::line1;
-
     // Augment with reverse complement
     std::string revseq = searchseq;
     reverseComplement(revseq);
@@ -300,7 +323,7 @@ namespace breaktracer {
       buf = std::cout.rdbuf();
     }
     std::ostream out(buf);
-    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqStrand\tInsSeqIdentity\tInsSeqCigar\tTd5Len\tTd5Seq\tTd3Len\tTd3Seq" << std::endl;
+    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqStrand\tInsSeqIdentity\tInsSeqCigar\tTd5Len\tTd5Seq\tTd5Inv\tTd3Len\tTd3Seq\tTd3Inv" << std::endl;
 
     // Open file handles
     samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
@@ -351,7 +374,7 @@ namespace breaktracer {
       out << ianno.posLeft << ',' << ianno.posRight << '\t';
       out << ianno.pos2Left << ',' << ianno.pos2Right << '\t';
       out << ianno.polyT << '\t' << ianno.polyA << '\t' << ianno.insStart << '\t' << ianno.insEnd << '\t' << strand << '\t' << ianno.consId << '\t' << ianno.cigar << '\t';
-      out << ianno.td5Len << '\t' << ianno.td5Seq << '\t' << ianno.td3Len << '\t' << ianno.td3Seq << std::endl;
+      out << ianno.td5Len << '\t' << ianno.td5Seq << '\t' << ianno.td5Inv << '\t' << ianno.td3Len << '\t' << ianno.td3Seq << '\t' << ianno.td3Inv << std::endl;
     }
     if (seq != NULL) free(seq);
     fai_destroy(fai);
