@@ -70,9 +70,38 @@ namespace breaktracer {
     float consId;
     std::string cigar;
 
-    InsAnno() : posLeft(-1), posRight(-1), pos2Left(-1), pos2Right(-1), polyT(0), polyA(0), insStart(-1), insEnd(-1), isRC(false), consId(0), cigar("*") {}
+    // Transduction
+    int32_t td5Len;
+    int32_t td3Len;
+    std::string td5Seq;
+    std::string td3Seq;
+    
+    InsAnno() : posLeft(-1), posRight(-1), pos2Left(-1), pos2Right(-1), polyT(0), polyA(0), insStart(-1), insEnd(-1), isRC(false), consId(0), cigar("*"), td5Len(0), td3Len(0), td5Seq("*"), td3Seq("*") {}
   };
 
+  inline int32_t
+  estimatePolyTail(std::string const& seq, bool const checkPolyA, float const minIdentity = 0.9) {
+    int32_t len = 0;
+    int32_t matches = 0;
+    int32_t total = 0;
+    if (checkPolyA) {
+      for (int i = seq.size() - 1; i >= 0; --i) {
+        if (seq[i] == 'A') ++matches;
+        ++total;
+        if ((float) matches / (float) total >= minIdentity) len = total;
+	else if ((total > 10) && ((float) matches / (float) total < 0.8)) break;
+      }
+    } else {
+      for (size_t i = 0; i < seq.size(); ++i) {
+        if (seq[i] == 'T') ++matches;
+        ++total;
+	if ((float) matches / (float) total >= minIdentity) len = total;
+	else if ((total > 10) && ((float) matches / (float) total < 0.8)) break;
+      }
+    }
+    return len;
+  }
+  
   template<typename TConfig>
   inline void
   annotateHomology(TConfig const& c, bam_hdr_t* hdr, faidx_t* fai, char const* seq, std::string const& searchseq, BrInTrace const& sv, InsAnno& ianno) {
@@ -162,18 +191,9 @@ namespace breaktracer {
 
     // Characterize insertion sequence
     if (!sv.consensus.empty()) {
-      // PolyT at start
-      for(uint32_t k = 0; k < sv.consensus.size(); ++k) {
-	if ((sv.consensus[k] == 'T') || (sv.consensus[k] == 't')) ianno.polyT++;
-	else break;
-      }
+      ianno.polyA = estimatePolyTail(sv.consensus, true);
+      ianno.polyT = estimatePolyTail(sv.consensus, false);
       
-      // PolyA at end
-      for(int32_t k = (int32_t) sv.consensus.size() - 1; k >= 0; --k) {
-	if ((sv.consensus[k] == 'A') || (sv.consensus[k] == 'a')) ianno.polyA++;
-	else break;
-      }
-
       // Align trimmed consensus
       int32_t cstart = ianno.polyT;
       int32_t cend = (int32_t) sv.consensus.size() - ianno.polyA;
@@ -191,6 +211,22 @@ namespace breaktracer {
 	      ianno.insStart -= halfLen;
 	      ianno.insEnd -= halfLen;
 	    }
+	    	    // Any transductions?
+            std::string meiSeq = searchseq.substr(ianno.isRC ? halfLen : 0, halfLen);
+            EdlibAlignResult trRes = edlibAlign(meiSeq.c_str(), meiSeq.size(), consBody.c_str(), consBody.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
+            if ((trRes.status == EDLIB_STATUS_OK) && (trRes.numLocations > 0)) {
+	      int32_t matchStart = trRes.startLocations[0];
+	      int32_t matchEnd = trRes.endLocations[0];
+	      if (matchStart > 30) {
+		ianno.td5Len = matchStart;
+		ianno.td5Seq = consBody.substr(0, matchStart);
+	      }
+	      if (matchEnd < (int)consBody.size() - 31) {
+		ianno.td3Len = (int)consBody.size() - 1 - matchEnd;
+		ianno.td3Seq = consBody.substr(matchEnd + 1);
+	      }
+	      edlibFreeAlignResult(trRes);
+            }
 	  }
 	  char* cig = edlibAlignmentToCigar(res.alignment, res.alignmentLength, EDLIB_CIGAR_STANDARD);
 	  ianno.cigar = std::string(cig);
@@ -233,7 +269,7 @@ namespace breaktracer {
       buf = std::cout.rdbuf();
     }
     std::ostream out(buf);
-    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqRC\tInsIdentity\tInsCigar" << std::endl;
+    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqRC\tInsIdentity\tInsCigar\tTd5Len\tTd5Seq\tTd3Len\tTd3Seq" << std::endl;
 
     // Open file handles
     samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
@@ -279,7 +315,8 @@ namespace breaktracer {
       annotateHomology(c, hdr, fai, seq, searchseq, sv[i], ianno);
       out << ianno.posLeft << ',' << ianno.posRight << '\t';
       out << ianno.pos2Left << ',' << ianno.pos2Right << '\t';
-      out << ianno.polyT << '\t' << ianno.polyA << '\t' << ianno.insStart << '\t' << ianno.insEnd << '\t' << ianno.isRC << '\t' << ianno.consId << '\t' << ianno.cigar << std::endl;
+      out << ianno.polyT << '\t' << ianno.polyA << '\t' << ianno.insStart << '\t' << ianno.insEnd << '\t' << ianno.isRC << '\t' << ianno.consId << '\t' << ianno.cigar << '\t';
+      out << ianno.td5Len << '\t' << ianno.td5Seq << '\t' << ianno.td3Len << '\t' << ianno.td3Seq << std::endl;
     }
     if (seq != NULL) free(seq);
     fai_destroy(fai);
