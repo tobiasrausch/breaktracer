@@ -18,6 +18,22 @@
 namespace breaktracer
 {
 
+  struct TraceCandidate {
+    uint32_t kLow;
+    uint32_t kHigh;
+    int32_t sStart;
+    int32_t sEnd;
+    int32_t len;
+    int32_t score;
+    double pid;
+
+    TraceCandidate(uint32_t const kL, uint32_t const kH, int32_t const sSt, int32_t const sEn, int32_t const ln, int32_t const s, double p) : kLow(kL), kHigh(kH), sStart(sSt), sEnd(sEn), len(ln), score(s), pid(p) {}
+    
+    bool operator<(const TraceCandidate& other) const {
+      return score > other.score;
+    }
+  };
+
   template<typename TReadBp>
   inline void
     _insertJunction(TReadBp& readBp, std::size_t const seed, bam1_t* rec, int32_t const rp, int32_t const sp, bool const scleft) {
@@ -206,99 +222,147 @@ namespace breaktracer
 
 
   template<typename TConfig, typename TReadBp>
-  inline bool
-  process_read(TConfig const& c, std::string const& searchseq, TReadBp& readBp, bam1_t* rec, TraceRecord& singleTR) {
+  inline void
+  process_read(TConfig const& c, std::string const& searchseq, TReadBp& readBp, bam1_t* rec, std::vector<TraceRecord>& traces) {
     int32_t maxFragSize = searchseq.size() + 0.15 * searchseq.size();
     std::size_t seed = hash_lr(rec);
     std::string sequence;
-		
-    // Get all sequences embedded in breakpoints
-    uint32_t insAlignLength = 0;
-    uint32_t kLow = 0;
-    uint32_t kHigh = 0;
-    double pid = 0;
-    for(uint32_t k = 1; k < readBp[seed].size(); ++k) {
-      if (readBp[seed][k].seqpos < (c.minSeedAlign + c.cropSize) ) continue;
-      if (readBp[seed][k].seqpos + (c.minSeedAlign + c.cropSize) > rec->core.l_qseq) continue;
-      if (!insAlignLength) kLow = k - 1;  // No previous hit
-      int32_t fragsize = readBp[seed][k].seqpos - readBp[seed][kLow].seqpos;
-      if ((fragsize > (c.minSeedAlign + c.cropSize)) && (fragsize < maxFragSize)) {
-	// Insertion fragment?
-	if (sequence.empty()) {
-	  sequence.resize(rec->core.l_qseq);
-	  const uint8_t* seqptr = bam_get_seq(rec);
-	  for (int i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
-	  // Reverse complement if necessary
-	  if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);
-	}
+    sequence.resize(rec->core.l_qseq);
+    const uint8_t* seqptr = bam_get_seq(rec);
+    for (int i = 0; i < rec->core.l_qseq; ++i) sequence[i] = "=ACMGRSVTWYHKDBN"[bam_seqi(seqptr, i)];
+    if (rec->core.flag & BAM_FREVERSE) reverseComplement(sequence);
 
-	// Full-length approach (good for transductions)
-	std::string fullseq = sequence.substr(readBp[seed][kLow].seqpos, fragsize);
-	EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-	double pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (fragsize) );
-	edlibFreeAlignResult(cigarFull);
-	if ((pIdFull > c.pctThres)  &&  ( (double) (fragsize) > ((0.25 * (double) (insAlignLength)) + insAlignLength))) {
-	  kHigh = k;
-	  insAlignLength = fragsize;
-	  pid = pIdFull;
-	  continue;
-	}
-	// Partial approach (good for rearranged insertions)
-	int32_t validSeeds = 0;
-	int32_t nCount = 0;
-	double percentIdentity = 0;
-	for(int32_t sCoord = readBp[seed][kLow].seqpos + c.cropSize; sCoord + c.minSeedAlign <= (readBp[seed][k].seqpos - c.cropSize); sCoord += c.minSeedAlign) {
-	  std::string subseq = sequence.substr(sCoord, c.minSeedAlign);
-	    
-	  // Align to Insertions
-	  EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-	  double pIdFull = 1.0 - ( (double) (cigar.editDistance) / (double) (c.minSeedAlign) );
-	  //printAlignment(subseq, searchseq, EDLIB_MODE_HW, cigar);
-	  edlibFreeAlignResult(cigar);
-	  percentIdentity += pIdFull;
-	  if (pIdFull > c.pctThres) ++validSeeds;
-	  ++nCount;
-	}
-	// Entire sequence highly-similar?
-	percentIdentity /= (double) nCount;
-	if (percentIdentity > c.pctThres) {
-	  kHigh = k;
-	  insAlignLength = fragsize;
-	  pid = percentIdentity;
-	}
-      }
-    }
-    bool validRead = false;
-    if (insAlignLength) {
-      // Make sure the leading and trailing sequence is NOT insertion sequence
-      validRead = true;
-      for(int32_t bp = 0; ((bp < 2) && (validRead)); ++bp) {
-	int32_t fragsize = readBp[seed][kLow].seqpos;
-	int32_t sCoord = 0;
-	if (bp) {
-	  sCoord = readBp[seed][kHigh].seqpos;
-	  fragsize = sequence.size() - sCoord;
-	}
-	if (fragsize < maxFragSize) {   // Otherwise clearly more than insertion content
-	  std::string subseq = sequence.substr(sCoord, fragsize);
+    // Get candidates
+    std::vector<TraceCandidate> candidates;
+    for(uint32_t i = 0; i < readBp[seed].size(); ++i) {
+      for(uint32_t k = i + 1; k < readBp[seed].size(); ++k) {
+	// Breakpoint coords on read sequence
+	int32_t sStart = readBp[seed][i].seqpos;
+	int32_t sEnd = readBp[seed][k].seqpos;
+	int32_t fragsize = sEnd - sStart;
+	if (sEnd < (c.minSeedAlign + c.cropSize)) continue; 
+	if (sStart + (c.minSeedAlign + c.cropSize) > rec->core.l_qseq) continue;
+	if ((fragsize > (c.minSeedAlign + c.cropSize)) && (fragsize < maxFragSize)) {
+	  double pid = 0;
+	  bool candidate = false;
 	  
-	  // Align to insertion
-	  EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-	  double percentIdentity = 1.0 - ( (double) (cigar.editDistance) / (double) (fragsize) );
-	  //printAlignment(subseq, searchseq, EDLIB_MODE_HW, cigar);
-	  edlibFreeAlignResult(cigar);		      
-	  if (percentIdentity > c.pctThres) validRead = false;
+	  // Full-length approach
+	  std::string fullseq = sequence.substr(sStart, fragsize);
+	  EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	  double pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (fragsize) );
+	  edlibFreeAlignResult(cigarFull);
+	  
+	  if (pIdFull > c.pctThres) {
+	    candidate = true;
+	    pid = pIdFull;
+	  } else {
+	    // Partial approach (scan seeds)
+	    int32_t validSeeds = 0;
+	    int32_t nCount = 0;
+	    double percentIdentity = 0;
+	    for(int32_t sCoord = sStart + c.cropSize; sCoord + c.minSeedAlign <= (sEnd - c.cropSize); sCoord += c.minSeedAlign) {
+	      std::string subseq = sequence.substr(sCoord, c.minSeedAlign);
+	      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	      double pIdSeed = 1.0 - ( (double) (cigar.editDistance) / (double) (c.minSeedAlign) );
+	      edlibFreeAlignResult(cigar);
+	      percentIdentity += pIdSeed;
+	      if (pIdSeed > c.pctThres) ++validSeeds;
+	      ++nCount;
+	    }
+	    if (validSeeds > 0) {
+	      percentIdentity /= (double) nCount;
+	      if (percentIdentity > c.pctThres) {
+		candidate = true;
+		pid = percentIdentity;
+	      }
+	    }
+	  }
+	  if (candidate) candidates.push_back(TraceCandidate(i, k, sStart, sEnd, fragsize, (int32_t) (fragsize * pid), pid));
 	}
       }
-      
-      // Store read
-      if (validRead) {
-	// Canonical ordering
-	if ((readBp[seed][kLow].refidx < readBp[seed][kHigh].refidx) || ( ( readBp[seed][kLow].refidx == readBp[seed][kHigh].refidx ) && (readBp[seed][kLow].refpos <= readBp[seed][kHigh].refpos) ) ) singleTR = TraceRecord(readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, (int32_t) (pid * 100), insAlignLength, seed);
-	else singleTR = TraceRecord(readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, (int32_t) (pid * 100), insAlignLength, seed);
+    }
+
+    // Sort by score
+    std::sort(candidates.begin(), candidates.end());
+
+    // Flag forced mappings (if sequence is present in reference)
+    typedef std::pair<int32_t, int32_t> TRefPos;
+    std::set<TRefPos> filterRefPos;
+    for(uint32_t i = 0; i < candidates.size(); ++i) {
+      if (readBp[seed][candidates[i].kLow].refidx == readBp[seed][candidates[i].kHigh].refidx) {
+	int32_t reflen = std::abs(readBp[seed][candidates[i].kHigh].refpos - readBp[seed][candidates[i].kLow].refpos);
+	int32_t seqlen = candidates[i].len;
+	double frac;
+	if (reflen < seqlen) frac = (double) reflen / (double) seqlen;
+	else frac = (double) seqlen / (double) reflen;
+	if (frac > 0.8) {
+	  filterRefPos.insert(std::make_pair(readBp[seed][candidates[i].kLow].refidx, readBp[seed][candidates[i].kLow].refpos));
+	  filterRefPos.insert(std::make_pair(readBp[seed][candidates[i].kHigh].refidx, readBp[seed][candidates[i].kHigh].refpos));
+	}
       }
     }
-    return validRead;
+
+    // Process candidates
+    std::vector<std::pair<int32_t, int32_t>> selectedIntervals;
+    for(const auto& cand : candidates) {
+      // check if one of the breakpoints got flagged
+      bool flagged = false;
+      if (filterRefPos.find(std::make_pair(readBp[seed][cand.kLow].refidx, readBp[seed][cand.kLow].refpos)) != filterRefPos.end()) flagged = true;
+      if (filterRefPos.find(std::make_pair(readBp[seed][cand.kHigh].refidx, readBp[seed][cand.kHigh].refpos)) != filterRefPos.end()) flagged = true;
+      if (flagged) continue;
+
+      // Debug
+      //std::cerr << bam_get_qname(rec) << '\t' << readBp[seed][cand.kLow].refidx << ':' << readBp[seed][cand.kLow].refpos << '\t' << readBp[seed][cand.kHigh].refidx << ':' << readBp[seed][cand.kHigh].refpos << '\t' << cand.len << ',' << cand.pid << ',' << cand.score << '\t' << cand.sStart << ',' << cand.sEnd << '\t' << cand.kLow << ',' << cand.kHigh << '\t' << flagged << std::endl;      
+
+      // check if it overlaps a processed interval
+      bool overlap = false;
+      for(const auto& interval : selectedIntervals) {
+	if (std::max(cand.sStart, interval.first) < std::min(cand.sEnd, interval.second)) {
+	  overlap = true;
+	  break;
+	}
+      }
+      if (overlap) continue;
+
+      // check for clean left flank
+      bool validFlanks = true;
+      int32_t leftAvail = cand.sStart;
+      if (leftAvail > 0) {
+	int32_t checkLen = std::min((int32_t) leftAvail, (int32_t) maxFragSize); 
+	if (checkLen > 50) { 
+	  std::string leftSeq = sequence.substr(cand.sStart - checkLen, checkLen);
+	  EdlibAlignResult cigar = edlibAlign(leftSeq.c_str(), leftSeq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	  double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (leftSeq.size()) );
+	  edlibFreeAlignResult(cigar);
+	  if (pId > c.pctThres) validFlanks = false;
+	} else validFlanks = false;
+      }
+
+      // right flank
+      int32_t rightAvail = sequence.size() - cand.sEnd;
+      if ((validFlanks) && (rightAvail > 0)) {
+	int32_t checkLen = std::min((int32_t) rightAvail, (int32_t) maxFragSize);
+	if (checkLen > 50) {
+	  std::string rightSeq = sequence.substr(cand.sEnd, checkLen);
+	  EdlibAlignResult cigar = edlibAlign(rightSeq.c_str(), rightSeq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	  double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (rightSeq.size()) );
+	  edlibFreeAlignResult(cigar);
+	  if (pId > c.pctThres) validFlanks = false;
+	} else validFlanks = false;
+      }
+
+      if (validFlanks) {
+	TraceRecord tr;
+	// Canonical ordering
+	if ((readBp[seed][cand.kLow].refidx < readBp[seed][cand.kHigh].refidx) || ( ( readBp[seed][cand.kLow].refidx == readBp[seed][cand.kHigh].refidx ) && (readBp[seed][cand.kLow].refpos <= readBp[seed][cand.kHigh].refpos) ) ) {
+	  tr = TraceRecord(readBp[seed][cand.kLow].refidx, readBp[seed][cand.kLow].refpos, readBp[seed][cand.kLow].seqpos, readBp[seed][cand.kHigh].refidx, readBp[seed][cand.kHigh].refpos, readBp[seed][cand.kHigh].seqpos, (int32_t) (cand.pid * 100), cand.len, seed);
+	} else {
+	  tr = TraceRecord(readBp[seed][cand.kHigh].refidx, readBp[seed][cand.kHigh].refpos, readBp[seed][cand.kHigh].seqpos, readBp[seed][cand.kLow].refidx, readBp[seed][cand.kLow].refpos, readBp[seed][cand.kLow].seqpos, (int32_t) (cand.pid * 100), cand.len, seed);
+	}
+	traces.push_back(tr);
+	selectedIntervals.push_back(std::make_pair(cand.sStart, cand.sEnd));
+      }
+    }
   }
   
 
@@ -388,7 +452,6 @@ namespace breaktracer
 	    // Keep only primary alignments
 	    if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
 	    std::size_t seed = hash_lr(rec);
-
 	    if (clusteredReads.find(seed) != clusteredReads.end()) {
 	      if (readBp[seed].size()>1) {
 		batch.push_back(bam_dup1(rec));
@@ -396,8 +459,9 @@ namespace breaktracer
 		  futures.push_back(pool.enqueue([&, batch] {
 		    std::vector<TraceRecord> local_tr;
 		    for(auto* srd : batch) {
-		      TraceRecord singleTR;
-		      if (process_read(c, searchseq, readBp, srd, singleTR)) local_tr.push_back(singleTR);
+		      std::vector<TraceRecord> singleTRs;
+		      process_read(c, searchseq, readBp, srd, singleTRs);
+		      local_tr.insert(local_tr.end(), singleTRs.begin(), singleTRs.end());
 		    }
 		    // Merge into shared vector
 		    std::lock_guard<std::mutex> lock(tr_mutex);
@@ -418,8 +482,9 @@ namespace breaktracer
 	futures.push_back(pool.enqueue([&, batch] {
 	  std::vector<TraceRecord> local_tr;
 	  for(auto* srd : batch) {
-	    TraceRecord singleTR;
-	    if (process_read(c, searchseq, readBp, srd, singleTR)) local_tr.push_back(singleTR);
+	    std::vector<TraceRecord> singleTRs;
+	    process_read(c, searchseq, readBp, srd, singleTRs);
+	    local_tr.insert(local_tr.end(), singleTRs.begin(), singleTRs.end());
 	  }
 	  // Merge into shared vector
 	  std::lock_guard<std::mutex> lock(tr_mutex);
@@ -445,120 +510,6 @@ namespace breaktracer
     std::sort(tr.begin(), tr.end());
   }
 
-
-
-  template<typename TConfig, typename TReadBp>
-  inline void
-  findBrInAll(TConfig const& c, TReadBp& readBp, std::vector<TraceRecord>& tr) {
-    int32_t maxFragSize = 10000;
-
-    // Open file handles
-    typedef std::vector<samFile*> TSamFile;
-    typedef std::vector<hts_idx_t*> TIndex;
-    TSamFile samfile(c.files.size());
-    TIndex idx(c.files.size());
-    for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-      samfile[file_c] = sam_open(c.files[file_c].string().c_str(), "r");
-      hts_set_fai_filename(samfile[file_c], c.genome.string().c_str());
-      idx[file_c] = sam_index_load(samfile[file_c], c.files[file_c].string().c_str());
-    }
-    bam_hdr_t* hdr = sam_hdr_read(samfile[0]);
-    
-    // Parse genome chr-by-chr
-    boost::posix_time::ptime now = boost::posix_time::second_clock::local_time();
-    std::cerr << '[' << boost::posix_time::to_simple_string(now) << "] " << "Insertion serach" << std::endl;
-
-    // Insertion candidate read search
-    std::set<std::size_t> clusteredReads;
-    for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
-      typedef std::vector<uint16_t> TCounter;
-      TCounter bp(hdr->target_len[refIndex], 0);
-      uint8_t maxVal = std::numeric_limits<uint8_t>::max();
-
-      // Cluster breakpoints +/-5bp
-      for(uint32_t z = 0; z < 2; ++z) {
-	for(typename TReadBp::const_iterator it = readBp.begin(); it != readBp.end(); ++it) {
-	  if (it->second.size() > 1) {
-	    for(uint32_t i = 0; i < it->second.size(); ++i) {
-	      if (it->second[i].refidx == refIndex) {
-		for(int32_t k = std::max(0, it->second[i].refpos - 5); k < std::min((int32_t) hdr->target_len[refIndex], it->second[i].refpos + 5); ++k) {
-		  if (z) {
-		    // 2nd pass
-		    if (bp[k] >= c.minCliqueSize) clusteredReads.insert(it->first);
-		  } else {
-		    // 1st pass
-		    if (bp[k] < maxVal) ++bp[k];
-		  }
-		}
-	      }
-	    }
-	  }
-	}
-      }
-      //std::cerr << refIndex << ',' << clusteredReads.size() << std::endl;
-    }
-
-    // Find insertion
-    if (!clusteredReads.empty()) {
-      for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
-	// Collect reads from all samples
-	for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-	  // Read alignments
-	  hts_itr_t* iter = sam_itr_queryi(idx[file_c], refIndex, 0, hdr->target_len[refIndex]);
-	  bam1_t* rec = bam_init1();
-	  while (sam_itr_next(samfile[file_c], iter, rec) >= 0) {
-	    // Keep only primary alignments
-	    if (rec->core.flag & (BAM_FQCFAIL | BAM_FDUP | BAM_FUNMAP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY)) continue;
-	    std::size_t seed = hash_lr(rec);
-
-	    if (clusteredReads.find(seed) != clusteredReads.end()) {
-	      if (readBp[seed].size()>1) {
-		// Get all sequences embedded in breakpoints
-		uint32_t insAlignLength = 0;
-		uint32_t kLow = 0;
-		uint32_t kHigh = 0;
-		double pid = 0;
-		for(uint32_t k = 1; k < readBp[seed].size(); ++k) {
-		  if (readBp[seed][k].seqpos < (c.minSeedAlign + c.cropSize) ) continue;
-		  if (readBp[seed][k].seqpos + (c.minSeedAlign + c.cropSize) > rec->core.l_qseq) continue;
-		  if (!insAlignLength) kLow = k - 1;  // No previous hit
-		  int32_t fragsize = readBp[seed][k].seqpos - readBp[seed][kLow].seqpos;
-		  if ((fragsize > (c.minSeedAlign + c.cropSize)) && (fragsize < maxFragSize)) {
-		    // At least 25% larger hit?
-		    if ( (double) (fragsize) > ((0.25 * (double) (insAlignLength)) + insAlignLength) ) {
-		      if ( (readBp[seed][kLow].refidx != readBp[seed][k].refidx) || ( (readBp[seed][kLow].refidx == readBp[seed][k].refidx) && (std::abs(readBp[seed][kLow].refpos - readBp[seed][k].refpos) > 100000) ) ) {
-			kHigh = k;
-			insAlignLength = fragsize;
-			pid = 1.0;
-		      }
-		    }
-		  }
-		}
-		if (insAlignLength) {
-		  // Canonical ordering
-		  if ((readBp[seed][kLow].refidx < readBp[seed][kHigh].refidx) || ( ( readBp[seed][kLow].refidx == readBp[seed][kHigh].refidx ) && (readBp[seed][kLow].refpos <= readBp[seed][kHigh].refpos) ) ) tr.push_back(TraceRecord(readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, (int32_t) (pid * 100), insAlignLength, seed));
-		  else tr.push_back(TraceRecord(readBp[seed][kHigh].refidx, readBp[seed][kHigh].refpos, readBp[seed][kHigh].seqpos, readBp[seed][kLow].refidx, readBp[seed][kLow].refpos, readBp[seed][kLow].seqpos, (int32_t) (pid * 100), insAlignLength, seed));
-		}
-	      }
-	    }
-	  }
-	  bam_destroy1(rec);
-	  hts_itr_destroy(iter);
-	}
-      }
-    }
-
-    // Clean-up
-    bam_hdr_destroy(hdr);
-    for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
-      hts_idx_destroy(idx[file_c]);
-      sam_close(samfile[file_c]);
-    }
-
-    // Sort traces
-    std::sort(tr.begin(), tr.end());
-  }   
-  
   template<typename TConfig>
   inline void
   brInTraces(TConfig const& c, std::vector<TraceRecord>& tr) {

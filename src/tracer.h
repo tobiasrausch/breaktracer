@@ -225,7 +225,7 @@ namespace breaktracer {
       int32_t matchStart = 0;
       int32_t matchEnd = sv.consensus.size();
       EdlibAlignResult trRes = edlibAlign(meiSeq.c_str(), meiSeq.size(), sv.consensus.c_str(), sv.consensus.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
-      printAlignment(meiSeq, sv.consensus, EDLIB_MODE_HW, trRes);
+      //printAlignment(meiSeq, sv.consensus, EDLIB_MODE_HW, trRes);
       if ((trRes.status == EDLIB_STATUS_OK) && (trRes.numLocations > 0)) {
 	matchStart = trRes.startLocations[0];
 	matchEnd = trRes.endLocations[0];
@@ -399,6 +399,7 @@ namespace breaktracer {
    typedef std::vector<TraceRecord> TTraceVector;
    TTraceVector tr;
    brInTraces(c, tr);
+   //for(uint32_t i = 0; i < tr.size(); ++i) std::cerr << tr[i].chr << ':' << tr[i].pos << '\t' << tr[i].chr2 << ':' << tr[i].pos2 << std::endl;
 
    // Cluster reads
    typedef std::vector<BrInTrace> TBrInVector;
