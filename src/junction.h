@@ -225,6 +225,7 @@ namespace breaktracer
   inline void
   process_read(TConfig const& c, std::string const& searchseq, TReadBp& readBp, bam1_t* rec, std::vector<TraceRecord>& traces) {
     int32_t maxFragSize = searchseq.size() + 0.15 * searchseq.size();
+    int32_t maxEdit = std::max((int) ((1.0 - c.pctThres) * c.minSeedAlign), 1);
     std::size_t seed = hash_lr(rec);
     std::string sequence;
     sequence.resize(rec->core.l_qseq);
@@ -238,46 +239,39 @@ namespace breaktracer
       for(uint32_t k = i + 1; k < readBp[seed].size(); ++k) {
 	// Breakpoint coords on read sequence
 	int32_t sStart = readBp[seed][i].seqpos;
-	int32_t sEnd = readBp[seed][k].seqpos;
+	int32_t sEnd = std::min(readBp[seed][k].seqpos, (int) rec->core.l_qseq);
 	int32_t fragsize = sEnd - sStart;
 	if (sEnd < (c.minSeedAlign + c.cropSize)) continue; 
 	if (sStart + (c.minSeedAlign + c.cropSize) > rec->core.l_qseq) continue;
 	if ((fragsize > (c.minSeedAlign + c.cropSize)) && (fragsize < maxFragSize)) {
 	  double pid = 0;
-	  bool candidate = false;
 	  
 	  // Full-length approach
 	  std::string fullseq = sequence.substr(sStart, fragsize);
-	  EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-	  double pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (fragsize) );
-	  edlibFreeAlignResult(cigarFull);
-	  
-	  if (pIdFull > c.pctThres) {
-	    candidate = true;
-	    pid = pIdFull;
-	  } else {
+	  EdlibAlignResult cigarFull = edlibAlign(fullseq.c_str(), fullseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(maxEdit, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	  double pIdFull = 0;
+	  if ( (cigarFull.status == EDLIB_STATUS_OK) && (cigarFull.editDistance != -1) ) pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (fragsize) );
+	  edlibFreeAlignResult(cigarFull);	  
+	  if (pIdFull > c.pctThres) pid = pIdFull;
+	  else {
 	    // Partial approach (scan seeds)
 	    int32_t validSeeds = 0;
 	    int32_t nCount = 0;
 	    double percentIdentity = 0;
-	    for(int32_t sCoord = sStart + c.cropSize; sCoord + c.minSeedAlign <= (sEnd - c.cropSize); sCoord += c.minSeedAlign) {
-	      std::string subseq = sequence.substr(sCoord, c.minSeedAlign);
-	      EdlibAlignResult cigar = edlibAlign(subseq.c_str(), subseq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-	      double pIdSeed = 1.0 - ( (double) (cigar.editDistance) / (double) (c.minSeedAlign) );
-	      edlibFreeAlignResult(cigar);
-	      percentIdentity += pIdSeed;
-	      if (pIdSeed > c.pctThres) ++validSeeds;
-	      ++nCount;
-	    }
-	    if (validSeeds > 0) {
-	      percentIdentity /= (double) nCount;
-	      if (percentIdentity > c.pctThres) {
-		candidate = true;
-		pid = percentIdentity;
+	    for(int32_t sCoord = sStart + c.cropSize; sCoord + c.minSeedAlign <= (sEnd - c.cropSize); sCoord += c.minSeedAlign, ++nCount) {
+	      EdlibAlignResult cigar = edlibAlign(sequence.substr(sCoord, c.minSeedAlign).c_str(), c.minSeedAlign, searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(maxEdit, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	      if ( (cigar.status == EDLIB_STATUS_OK) && (cigar.editDistance != -1) ) {
+		double pidPartial = 1.0 - ( (double) (cigar.editDistance) / (double) (c.minSeedAlign));
+		if (pidPartial > c.pctThres) {
+		  percentIdentity += pidPartial;
+		  ++validSeeds;
+		}
 	      }
+	      edlibFreeAlignResult(cigar);
 	    }
+	    if ( (validSeeds > 0) && ( ((double) validSeeds / (double) nCount) >= 0.6) ) pid = percentIdentity / (double) validSeeds;
 	  }
-	  if (candidate) candidates.push_back(TraceCandidate(i, k, sStart, sEnd, fragsize, (int32_t) (fragsize * pid), pid));
+	  if (pid > c.pctThres) candidates.push_back(TraceCandidate(i, k, sStart, sEnd, fragsize, (int32_t) (fragsize * pid), pid));
 	}
       }
     }
@@ -303,6 +297,8 @@ namespace breaktracer
     }
 
     // Process candidates
+    bool checkedFlanks = false;
+    bool validFlanks = true;
     std::vector<std::pair<int32_t, int32_t>> selectedIntervals;
     for(const auto& cand : candidates) {
       // check if one of the breakpoints got flagged
@@ -324,30 +320,22 @@ namespace breaktracer
       }
       if (overlap) continue;
 
-      // check for clean left flank
-      bool validFlanks = true;
-      int32_t leftAvail = cand.sStart;
-      if (leftAvail > 0) {
-	int32_t checkLen = std::min((int32_t) leftAvail, (int32_t) maxFragSize); 
-	if (checkLen > 50) { 
-	  std::string leftSeq = sequence.substr(cand.sStart - checkLen, checkLen);
-	  EdlibAlignResult cigar = edlibAlign(leftSeq.c_str(), leftSeq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-	  double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (leftSeq.size()) );
-	  edlibFreeAlignResult(cigar);
-	  if (pId > c.pctThres) validFlanks = false;
-	} else validFlanks = false;
-      }
-
-      // right flank
-      int32_t rightAvail = sequence.size() - cand.sEnd;
-      if ((validFlanks) && (rightAvail > 0)) {
-	int32_t checkLen = std::min((int32_t) rightAvail, (int32_t) maxFragSize);
-	if (checkLen > 50) {
-	  std::string rightSeq = sequence.substr(cand.sEnd, checkLen);
-	  EdlibAlignResult cigar = edlibAlign(rightSeq.c_str(), rightSeq.size(), searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
-	  double pId = 1.0 - ( (double) (cigar.editDistance) / (double) (rightSeq.size()) );
-	  edlibFreeAlignResult(cigar);
-	  if (pId > c.pctThres) validFlanks = false;
+      // check for clean flanks
+      if (!checkedFlanks) {
+	checkedFlanks = true;
+	if (c.cropSize + c.minSeedAlign < rec->core.l_qseq) {
+	  EdlibAlignResult cigarLeft = edlibAlign(sequence.substr(c.cropSize, c.minSeedAlign).c_str(), c.minSeedAlign, searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(maxEdit, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	  if ( (cigarLeft.status == EDLIB_STATUS_OK) && (cigarLeft.editDistance != -1) ) {
+	    double pId = 1.0 - ( (double) (cigarLeft.editDistance) / (double) (c.minSeedAlign) );
+	    if (pId > c.pctThres) validFlanks = false;
+	  }
+	  edlibFreeAlignResult(cigarLeft);
+	  EdlibAlignResult cigarRight = edlibAlign(sequence.substr(rec->core.l_qseq - (c.cropSize + c.minSeedAlign), c.minSeedAlign).c_str(), c.minSeedAlign, searchseq.c_str(), searchseq.size(), edlibNewAlignConfig(maxEdit, EDLIB_MODE_HW, EDLIB_TASK_DISTANCE, NULL, 0));
+	  if ( (cigarRight.status == EDLIB_STATUS_OK) && (cigarRight.editDistance != -1) ) {
+	    double pId = 1.0 - ( (double) (cigarRight.editDistance) / (double) (c.minSeedAlign) );
+	    if (pId > c.pctThres) validFlanks = false;
+	  }
+	  edlibFreeAlignResult(cigarRight);
 	} else validFlanks = false;
       }
 
