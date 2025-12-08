@@ -285,6 +285,7 @@ namespace breaktracer {
 	char* cig = edlibAlignmentToCigar(res.alignment, res.alignmentLength, EDLIB_CIGAR_STANDARD);
 	ianno.cigar = std::string(cig);
 	free(cig);
+	edlibFreeAlignResult(res);
       }
     }
   }
