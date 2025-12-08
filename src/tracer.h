@@ -310,6 +310,7 @@ namespace breaktracer {
       if (c.insmode != 4) searchseq += MEI::polyA;
     }
     // Augment with reverse complement
+    int32_t minComplexOffset = searchseq.size() * 2;
     std::string revseq = searchseq;
     reverseComplement(revseq);
     searchseq += revseq;
@@ -359,7 +360,7 @@ namespace breaktracer {
       int32_t offset = std::abs(sv[i].pos - sv[i].pos2);
       //out << c.sampleName[file_c] << '\t';
       if (sv[i].chr != sv[i].chr2) out << "InterChromosomalSVwithInsertion";
-      else if (offset > 10000) out << "IntraChromosomalSVwithInsertion";
+      else if (offset > minComplexOffset) out << "IntraChromosomalSVwithInsertion";
       else out << "PlainInsertion";
       out << '\t';
       out << sv[i].consensus.size() << '\t';
