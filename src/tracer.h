@@ -325,7 +325,7 @@ namespace breaktracer {
       buf = std::cout.rdbuf();
     }
     std::ostream out(buf);
-    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqStrand\tInsSeqIdentity\tInsSeqCigar\tTd5Len\tTd5Seq\tTd5Inv\tTd3Len\tTd3Seq\tTd3Inv" << std::endl;
+    out << "BrInId\tRefCoord1\tRefCoord2\tBrInEstFragmentSize\tPercentIdentity\tReadSupport\tBrInType\tBrInSeqSize\tBrInSequence\tRefCoord1HomLen\tRefCoord2HomLen\tPolyT\tPolyA\tInsSeqStart\tInsSeqEnd\tInsSeqStrand\tInsSeqIdentity\tInsSeqCigar\tTd5Len\tTd5Seq\tTd5Inv\tTd3Len\tTd3Seq\tTd3Inv\tMapq" << std::endl;
 
     // Open file handles
     samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
@@ -376,7 +376,8 @@ namespace breaktracer {
       out << ianno.posLeft << ',' << ianno.posRight << '\t';
       out << ianno.pos2Left << ',' << ianno.pos2Right << '\t';
       out << ianno.polyT << '\t' << ianno.polyA << '\t' << ianno.insStart << '\t' << ianno.insEnd << '\t' << strand << '\t' << ianno.consId << '\t' << ianno.cigar << '\t';
-      out << ianno.td5Len << '\t' << ianno.td5Seq << '\t' << ianno.td5Inv << '\t' << ianno.td3Len << '\t' << ianno.td3Seq << '\t' << ianno.td3Inv << std::endl;
+      out << ianno.td5Len << '\t' << ianno.td5Seq << '\t' << ianno.td5Inv << '\t' << ianno.td3Len << '\t' << ianno.td3Seq << '\t' << ianno.td3Inv << '\t';
+      out << sv[i].mapq << std::endl;
     }
     if (seq != NULL) free(seq);
     fai_destroy(fai);

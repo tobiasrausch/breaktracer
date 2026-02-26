@@ -72,6 +72,8 @@ namespace breaktracer
       qual.push_back(tr[itWEdge->source].qual);
       std::vector<int32_t> inslen;
       inslen.push_back(tr[itWEdge->source].inslen);
+      std::vector<int32_t> mapq;
+      mapq.push_back(tr[itWEdge->source].mapq);
 
       // Initialize wiggle
       uint32_t wiggle = c.minRefSep;
@@ -108,6 +110,7 @@ namespace breaktracer
 	      ciendhigh = newCiEndHigh;
 	      qual.push_back(tr[v].qual);
 	      inslen.push_back(tr[v].inslen);
+	      mapq.push_back(tr[v].mapq);
 	    }
 	  } else incompatible.insert(v);
 	}
@@ -119,7 +122,8 @@ namespace breaktracer
 	int32_t fpos2 = mdv(refpos2);
 	int32_t qout = mdv(qual);
 	int32_t iout = mdv(inslen);
-	sv.push_back(BrInTrace(chr, fpos, chr2, fpos2, qout, iout, seeds));
+	int32_t mqout = mdv(mapq);
+	sv.push_back(BrInTrace(chr, fpos, chr2, fpos2, qout, iout, mqout, seeds));
       }
     }
   }

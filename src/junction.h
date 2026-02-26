@@ -343,9 +343,9 @@ namespace breaktracer
 	TraceRecord tr;
 	// Canonical ordering
 	if ((readBp[seed][cand.kLow].refidx < readBp[seed][cand.kHigh].refidx) || ( ( readBp[seed][cand.kLow].refidx == readBp[seed][cand.kHigh].refidx ) && (readBp[seed][cand.kLow].refpos <= readBp[seed][cand.kHigh].refpos) ) ) {
-	  tr = TraceRecord(readBp[seed][cand.kLow].refidx, readBp[seed][cand.kLow].refpos, readBp[seed][cand.kLow].seqpos, readBp[seed][cand.kHigh].refidx, readBp[seed][cand.kHigh].refpos, readBp[seed][cand.kHigh].seqpos, (int32_t) (cand.pid * 100), cand.len, seed);
+	  tr = TraceRecord(readBp[seed][cand.kLow].refidx, readBp[seed][cand.kLow].refpos, readBp[seed][cand.kLow].seqpos, readBp[seed][cand.kHigh].refidx, readBp[seed][cand.kHigh].refpos, readBp[seed][cand.kHigh].seqpos, (int32_t) (cand.pid * 100), cand.len, rec->core.qual, seed);
 	} else {
-	  tr = TraceRecord(readBp[seed][cand.kHigh].refidx, readBp[seed][cand.kHigh].refpos, readBp[seed][cand.kHigh].seqpos, readBp[seed][cand.kLow].refidx, readBp[seed][cand.kLow].refpos, readBp[seed][cand.kLow].seqpos, (int32_t) (cand.pid * 100), cand.len, seed);
+	  tr = TraceRecord(readBp[seed][cand.kHigh].refidx, readBp[seed][cand.kHigh].refpos, readBp[seed][cand.kHigh].seqpos, readBp[seed][cand.kLow].refidx, readBp[seed][cand.kLow].refpos, readBp[seed][cand.kLow].seqpos, (int32_t) (cand.pid * 100), cand.len, rec->core.qual, seed);
 	}
 	traces.push_back(tr);
 	selectedIntervals.push_back(std::make_pair(cand.sStart, cand.sEnd));
