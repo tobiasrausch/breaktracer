@@ -2,10 +2,9 @@
 
 ## Installing breaktracer
 
-BreakTracer is available as a [statically linked binary](https://github.com/tobiasrausch/breaktracer/releases/), as a minimal [docker container](https://hub.docker.com/r/trausch/breaktracer/) or as a [singularity containter (SIF file)](https://github.com/tobiasrausch/breaktracer/releases/).
+BreakTracer is available as a [statically linked binary](https://github.com/tobiasrausch/breaktracer/releases/), as a minimal [docker container](https://hub.docker.com/r/trausch/breaktracer/) or as a [singularity containter (SIF file)](https://github.com/tobiasrausch/breaktracer/releases/). The static binaries you can simply download [here](https://github.com/tobiasrausch/breaktracer/releases/) and then make them executable, e.g.:
 
 ```
-wget https://github.com/tobiasrausch/breaktracer/releases/download/v0.0.5/breaktracer_v0.0.5_linux_x86_64bit
 chmod a+x breaktracer_v0.0.5_linux_x86_64bit
 ./breaktracer_v0.0.5_linux_x86_64bit
 ```
