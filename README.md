@@ -24,11 +24,15 @@ BreakTracer can be built from source using a recursive clone and make. BreakTrac
 
 BreakTracer has been designed to identify inserted sequence fragments at structural variant (SV) breakpoints using long-read sequencing data. For instance, to identify L1 fragments at SV breakpoints:
 
-`breaktracer find -n L1 -g hg38.fa input.bam > breakpoint.insertion.tsv`
+`breaktracer find -n L1 -g hg38.fa input.bam > bp.ins.vcf`
 
-BreakTracer can also be used to identify a custom FASTA sequence inserted at SV breakpoints. For instance, to identify a human papillomavirus integration:
+BreakTracer can also be used to identify a custom FASTA sequence inserted at SV breakpoints. For instance, to identify a human papillomavirus integration you can use
 
-`breaktracer find -e hpv.seq.fa -g hg38.fa input.bam > breakpoint.insertion.tsv`
+`breaktracer find -e hpv.seq.fa -g hg38.fa input.bam > bp.ins.vcf`
+
+or with BCF output:
+
+`breaktracer find -e hpv.seq.fa -g hg38.fa -o bp.ins.bcf input.bam`
 
 ## License
 
