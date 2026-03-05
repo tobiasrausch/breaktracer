@@ -17,7 +17,7 @@
 
 namespace breaktracer
 {
-
+  
   // Junction record
   struct Junction {
     bool forward;
@@ -177,6 +177,21 @@ namespace breaktracer
     std::size_t n = v.size() / 2;
     std::nth_element(v.begin(), v.begin()+n, v.end());
     return v[n];
+  }
+
+  inline int32_t
+  inputType(std::string const& path) {
+    htsFile *hts_fp = hts_open(path.c_str(), "r");
+    if (hts_fp == NULL) return -1;
+    else {
+      std::string ext = std::string(hts_format_file_extension(hts_get_format(hts_fp)));
+      hts_close(hts_fp);
+      if ((ext == "bam") || (ext == "cram")) return 0;
+      else if (ext == "fa") return 1;
+      else if (ext == "fq") return 2;
+      else if (ext == "bed") return 3;
+      else return -1;
+    }
   }
   
   inline uint32_t

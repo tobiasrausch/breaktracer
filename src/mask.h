@@ -148,7 +148,6 @@ namespace breaktracer {
    MaskConfig c;
    
    // Parameter
-   std::string mode;
    std::string instag;
    boost::program_options::options_description generic("Generic options");
    generic.add_options()

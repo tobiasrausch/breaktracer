@@ -74,10 +74,11 @@ namespace breaktracer
 
     // Load optional genome mask
     faidx_t* faiMap = NULL;
-    if (c.hasGenomeMask) faiMap = fai_load(c.mask.string().c_str());
+    if ((c.hasGenomeMask) && (c.hasGenomeMask != 3)) faiMap = fai_load(c.mask.string().c_str());
     
     // Iterate chromosomes
     for(int32_t refIndex=0; refIndex < (int32_t) hdr->n_targets; ++refIndex) {
+
       // Load optional genome mask
       typedef boost::dynamic_bitset<> TBitSet;
       TBitSet masked;
@@ -85,12 +86,37 @@ namespace breaktracer
       if (c.hasGenomeMask) {
 	masked.resize(hdr->target_len[refIndex], false);
 	std::string tname(hdr->target_name[refIndex]);
-	int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
-	if (seqlen != - 1) {
-	  int32_t seqout = -1;
-	  seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, seqlen, &seqout);
-	  for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
-	    if (seq[i] == 'N') masked[i] = true;
+	if (c.hasGenomeMask == 3) { // BED input
+	  std::ifstream chrFile(c.mask.string(), std::ifstream::in);
+	  if (chrFile.is_open()) {
+	    while (chrFile.good()) {
+	      std::string chrFromFile;
+	      getline(chrFile, chrFromFile);
+	      typedef boost::tokenizer< boost::char_separator<char> > Tokenizer;
+	      boost::char_separator<char> sep(" \t,;");
+	      Tokenizer tokens(chrFromFile, sep);
+	      Tokenizer::iterator tokIter = tokens.begin();
+	      if (tokIter!=tokens.end()) {
+		std::string chrName = *tokIter++;
+		if (chrName == tname) {
+		  if (tokIter!=tokens.end()) {
+		    int32_t start = boost::lexical_cast<int32_t>(*tokIter++);
+		    int32_t end = boost::lexical_cast<int32_t>(*tokIter++);
+		    for(int32_t i = start; ((i < end) && (i < (int32_t) hdr->target_len[refIndex])); ++i) masked[i] = true;
+		  }
+		}
+	      }
+	    }
+	    chrFile.close();
+	  }
+	} else {
+	  int32_t seqlen = faidx_seq_len(faiMap, tname.c_str());
+	  if (seqlen != - 1) {
+	    int32_t seqout = -1;
+	    seq = faidx_fetch_seq(faiMap, tname.c_str(), 0, seqlen, &seqout);
+	    for(uint32_t i = 0; i < hdr->target_len[refIndex]; ++i) {
+	      if (seq[i] == 'N') masked[i] = true;
+	    }
 	  }
 	}
       }
@@ -203,7 +229,7 @@ namespace breaktracer
 	bam_destroy1(rec);
 	hts_itr_destroy(iter);
       }
-      if (c.hasGenomeMask) {
+      if ((c.hasGenomeMask) && (c.hasGenomeMask != 3)) {	
 	if (seq != NULL) free(seq);
       }
     }
@@ -212,7 +238,7 @@ namespace breaktracer
     for(typename TReadBp::iterator it = readBp.begin(); it != readBp.end(); ++it) std::sort(it->second.begin(), it->second.end());
 
     // Clean-up
-    if (c.hasGenomeMask) fai_destroy(faiMap);
+    if ((c.hasGenomeMask) && (c.hasGenomeMask != 3)) fai_destroy(faiMap);
     bam_hdr_destroy(hdr);
     for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
       hts_idx_destroy(idx[file_c]);

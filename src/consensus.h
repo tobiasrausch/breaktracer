@@ -229,20 +229,11 @@ namespace breaktracer
       }
     }
     
-    // Align to best sequence
+    // Get alignment scores to best sequence
     std::vector<std::pair<int32_t, int32_t> > qscores;
     qscores.push_back(std::make_pair(0, bestIdx));
-    std::string revc = sps[bestIdx];
-    reverseComplement(revc);
     for(uint32_t j = 0; j < sps.size(); ++j) {
-      if (j != bestIdx) {
-	EdlibAlignResult align = edlibAlign(revc.c_str(), revc.size(), sps[j].c_str(), sps[j].size(), edlibNewAlignConfig(-1, EDLIB_MODE_NW, EDLIB_TASK_DISTANCE, NULL, 0));
-	if (align.editDistance < edit[bestIdx * sps.size() + j]) {
-	  reverseComplement(sps[j]);
-	  qscores.push_back(std::make_pair(align.editDistance, j));
-	} else qscores.push_back(std::make_pair(edit[bestIdx * sps.size() + j], j));
-	edlibFreeAlignResult(align);
-      }
+      if (j != bestIdx) qscores.push_back(std::make_pair(edit[bestIdx * sps.size() + j], j));
     }
     std::sort(qscores.begin(), qscores.end());
     
@@ -372,7 +363,9 @@ namespace breaktracer
 		int32_t sCoord = std::min(tr[trMap[seed]].seqpos, tr[trMap[seed]].seqpos2);
 		// Debug
 		//std::cerr << svid << ',' << sCoord << ',' << fragsize << std::endl;
-		seqStore[svid].push_back(sequence.substr(sCoord, fragsize));
+		std::string frag = sequence.substr(sCoord, fragsize);
+		if (rec->core.flag & BAM_FREVERSE) reverseComplement(frag);
+		seqStore[svid].push_back(frag);
 
 		// Enough split-reads?
 		if ((seqStore[svid].size() == c.maxReadPerSV) || (seqStore[svid].size() == sv[svid].seeds.size())) {

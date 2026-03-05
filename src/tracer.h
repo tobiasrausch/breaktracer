@@ -31,7 +31,7 @@ namespace breaktracer {
 
 
   struct TracerConfig {
-    bool hasGenomeMask;
+    uint16_t hasGenomeMask;
     uint16_t insmode;
     uint16_t minMapQual;
     uint32_t minRefSep;
@@ -406,6 +406,7 @@ namespace breaktracer {
 
       // Breakpoint insertion type
       int32_t offset = std::abs(sv[i].pos - sv[i].pos2);
+      offset -= (int32_t) sv[i].consensus.size();
       std::string brintype;
       if (sv[i].chr != sv[i].chr2) brintype = "InterChromosomalSVwithInsertion";
       else if (offset > minComplexOffset) brintype = "IntraChromosomalSVwithInsertion";
@@ -422,7 +423,13 @@ namespace breaktracer {
       rec->pos = sv[i].pos;  // 0-based (htslib internal)
       bcf_update_id(vcfhdr, rec, id.c_str());
       std::string alleles(1, (char) std::toupper((unsigned char) seq[sv[i].pos]));
-      alleles += sv[i].consensus.empty() ? "," + altStr : "," + sv[i].consensus;
+      if (sv[i].consensus.empty()) alleles += "," + altStr;
+      else {
+	if ((brintype == "PlainInsertion") && (std::abs(sv[i].pos - sv[i].pos2) > 1)) {
+	  alleles = boost::to_upper_copy(std::string(seq + std::min(sv[i].pos, sv[i].pos2), seq + std::max(sv[i].pos, sv[i].pos2)));
+	}
+	alleles += "," + std::string(1, (char) std::toupper((unsigned char) seq[sv[i].pos])) + sv[i].consensus;
+      }
       bcf_update_alleles_str(vcfhdr, rec, alleles.c_str());
       int32_t qvalout = sv[i].mapq * sv[i].seeds.size();
       if (qvalout < 0) qvalout = 0;
@@ -575,7 +582,7 @@ namespace breaktracer {
     
     boost::program_options::options_description brin("Breakpoint insertion options");
     brin.add_options()
-      ("mask,k", boost::program_options::value<boost::filesystem::path>(&c.mask), "genome mask")
+      ("mask,k", boost::program_options::value<boost::filesystem::path>(&c.mask), "genome mask in FASTA or BED format")
       ("cropsize,r", boost::program_options::value<int32_t>(&c.cropSize)->default_value(20), "leading/trailing crop size")
       ("seedlen,s", boost::program_options::value<int32_t>(&c.minSeedAlign)->default_value(130), "min. seed length")
       ("pctid,i", boost::program_options::value<float>(&c.pctThres)->default_value(0.9), "min. percent identity")
@@ -676,8 +683,11 @@ namespace breaktracer {
     checkSampleNames(c);
     
     // Genome mask
-    if (vm.count("mask")) c.hasGenomeMask = true;
-    else c.hasGenomeMask = false;
+    if (vm.count("mask")) {
+      int32_t itype = inputType(c.mask.string());
+      if (itype < 0) c.hasGenomeMask = 0;
+      else c.hasGenomeMask = itype;
+    } else c.hasGenomeMask = 0;
    
     // Check outfile
     if (!vm.count("outfile")) c.outfile = "-";
@@ -686,12 +696,12 @@ namespace breaktracer {
 	if (!_outfileValid(c.outfile)) return 1;
       }
     }
-    
+
     // Long-read options
     if (mode == "pb") c.indelExtension = 0.7;
     else if (mode == "ont") c.indelExtension = 0.5;
-    
-   // Insertion mode, 0=FASTA, 1=ALU, 2=L1, 3=SVA
+
+    // Insertion mode, 0=FASTA, 1=ALU, 2=L1, 3=SVA
     if (vm.count("insseq")) {
       c.insmode = 0;
       if (!(boost::filesystem::exists(c.insseq) && boost::filesystem::is_regular_file(c.insseq) && boost::filesystem::file_size(c.insseq))) {
