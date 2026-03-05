@@ -21,6 +21,7 @@
 #include <htslib/vcf.h>
 #include <htslib/faidx.h>
 
+#include "bolog.h"
 #include "edlib.h"
 #include "util.h"
 #include "junction.h"
@@ -374,6 +375,12 @@ namespace breaktracer {
     bcf_hdr_append(vcfhdr, "##INFO=<ID=HOMLEN1R,Number=1,Type=Integer,Description=\"Bp1 right homology length\">");
     bcf_hdr_append(vcfhdr, "##INFO=<ID=HOMLEN2L,Number=1,Type=Integer,Description=\"Bp2 left homology length\">");
     bcf_hdr_append(vcfhdr, "##INFO=<ID=HOMLEN2R,Number=1,Type=Integer,Description=\"Bp2 right homology length\">");
+    bcf_hdr_append(vcfhdr, "##FORMAT=<ID=GT,Number=1,Type=String,Description=\"Genotype\">");
+    bcf_hdr_append(vcfhdr, "##FORMAT=<ID=GL,Number=G,Type=Float,Description=\"Log10-scaled genotype likelihoods for RR,RA,AA genotypes\">");
+    bcf_hdr_append(vcfhdr, "##FORMAT=<ID=GQ,Number=1,Type=Integer,Description=\"Genotype Quality\">");
+    bcf_hdr_append(vcfhdr, "##FORMAT=<ID=FT,Number=1,Type=String,Description=\"Per-sample genotype filter\">");
+    bcf_hdr_append(vcfhdr, "##FORMAT=<ID=RR,Number=1,Type=Integer,Description=\"# high-quality reference junction reads\">");
+    bcf_hdr_append(vcfhdr, "##FORMAT=<ID=RV,Number=1,Type=Integer,Description=\"# high-quality variant junction reads\">");
     std::string refloc("##reference=");
     refloc += c.genome.string();
     bcf_hdr_append(vcfhdr, refloc.c_str());
@@ -382,6 +389,7 @@ namespace breaktracer {
       refname += std::string(bamhd->target_name[i]) + ",length=" + std::to_string(bamhd->target_len[i]) + ">";
       bcf_hdr_append(vcfhdr, refname.c_str());
     }
+    bcf_hdr_add_sample(vcfhdr, c.files[0].stem().string().c_str());
     bcf_hdr_add_sample(vcfhdr, NULL);
     if (bcf_hdr_write(fp, vcfhdr) != 0) std::cerr << "Error: Failed to write VCF header!" << std::endl;
 
@@ -502,6 +510,42 @@ namespace breaktracer {
 	tmpi = ianno.pos2Right;
 	bcf_update_info_int32(vcfhdr, rec, "HOMLEN2R", &tmpi, 1);
       }
+
+      // Genotype
+      {
+	BoLog<double> bl;
+	std::vector<int32_t> mapqRef;
+	std::vector<int32_t> mapqAlt;
+	int32_t qstart = sv[i].pos > 0 ? sv[i].pos - 1 : 0;
+	int32_t qend = sv[i].pos + 1;
+	hts_itr_t* giter = sam_itr_queryi(idx, sv[i].chr, qstart, qend);
+	bam1_t* greg = bam_init1();
+	while (sam_itr_next(samfile, giter, greg) >= 0) {
+	  if (greg->core.flag & (BAM_FUNMAP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FQCFAIL | BAM_FDUP)) continue;
+	  if (greg->core.qual < 1) continue;
+	  std::size_t seed = hash_lr(greg);
+	  if (sv[i].seeds.count(seed)) mapqAlt.push_back(greg->core.qual);
+	  else mapqRef.push_back(greg->core.qual);
+	}
+	bam_destroy1(greg);
+	hts_itr_destroy(giter);
+
+	float gls[3] = {0, 0, 0};
+	int32_t gqval[1] = {0};
+	int32_t gts[2] = {bcf_gt_missing, bcf_gt_missing};
+	_computeGLs(bl, mapqRef, mapqAlt, gls, gqval, gts, 0);
+	bcf_update_genotypes(vcfhdr, rec, gts, 2);
+	bcf_update_format_float(vcfhdr, rec, "GL", gls, 3);
+	bcf_update_format_int32(vcfhdr, rec, "GQ", gqval, 1);
+	std::string ftstr = (gqval[0] < 15) ? "LowQual" : "PASS";
+	const char* ftp = ftstr.c_str();
+	bcf_update_format_string(vcfhdr, rec, "FT", &ftp, 1);
+	int32_t rrval = (int32_t) mapqRef.size();
+	int32_t rvval = (int32_t) mapqAlt.size();
+	bcf_update_format_int32(vcfhdr, rec, "RR", &rrval, 1);
+	bcf_update_format_int32(vcfhdr, rec, "RV", &rvval, 1);
+      }
+      // Write record
       bcf_write1(fp, vcfhdr, rec);
     }
     bcf_destroy(rec);
