@@ -290,6 +290,13 @@ namespace breaktracer {
       }
     }
   }
+
+  // Convert string to char*
+  struct cstyle_str {
+    const char* operator ()(const std::string& s) {
+      return s.c_str();
+    }
+  };
   
   template<typename TConfig>
   inline void
@@ -322,11 +329,19 @@ namespace breaktracer {
     else if (c.insmode == 4) altStr = "<INS:MT>";
     else altStr = "<INS>";
 
-    // Open BAM file for header and annotation
-    samFile* samfile = sam_open(c.files[0].string().c_str(), "r");
-    hts_set_fai_filename(samfile, c.genome.string().c_str());
-    hts_idx_t* idx = sam_index_load(samfile, c.files[0].string().c_str());
-    bam_hdr_t* bamhd = sam_hdr_read(samfile);
+    // Open BAM files for genotyping
+    typedef std::vector<samFile*> TSamFile;
+    typedef std::vector<hts_idx_t*> TIndex;
+    typedef std::vector<bam_hdr_t*> THeader;
+    TSamFile samfile(c.files.size());
+    TIndex idx(c.files.size());
+    THeader bamhd(c.files.size());
+    for(uint32_t file_c = 0; file_c < c.files.size(); ++file_c) {
+      samfile[file_c] = sam_open(c.files[file_c].string().c_str(), "r");
+      hts_set_fai_filename(samfile[file_c], c.genome.string().c_str());
+      idx[file_c] = sam_index_load(samfile[file_c], c.files[file_c].string().c_str());
+      bamhd[file_c] = sam_hdr_read(samfile[file_c]);
+    }
     faidx_t* fai = fai_load(c.genome.string().c_str());
 
     // Open output VCF/BCF (binary BCF to file, text VCF to stdout)
@@ -384,12 +399,13 @@ namespace breaktracer {
     std::string refloc("##reference=");
     refloc += c.genome.string();
     bcf_hdr_append(vcfhdr, refloc.c_str());
-    for (int i = 0; i < bamhd->n_targets; ++i) {
+    for (int i = 0; i < bamhd[0]->n_targets; ++i) {
       std::string refname("##contig=<ID=");
-      refname += std::string(bamhd->target_name[i]) + ",length=" + std::to_string(bamhd->target_len[i]) + ">";
+      refname += std::string(bamhd[0]->target_name[i]) + ",length=" + std::to_string(bamhd[0]->target_len[i]) + ">";
       bcf_hdr_append(vcfhdr, refname.c_str());
     }
-    bcf_hdr_add_sample(vcfhdr, c.files[0].stem().string().c_str());
+    // Add samples
+    for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) bcf_hdr_add_sample(vcfhdr, c.sampleName[file_c].c_str());
     bcf_hdr_add_sample(vcfhdr, NULL);
     if (bcf_hdr_write(fp, vcfhdr) != 0) std::cerr << "Error: Failed to write VCF header!" << std::endl;
 
@@ -397,19 +413,26 @@ namespace breaktracer {
     char* seq = NULL;
     int lastIdx = -1;
     bcf1_t* rec = bcf_init();
+    int32_t *gts = (int*) malloc(bcf_hdr_nsamples(vcfhdr) * 2 * sizeof(int));
+    float *gls = (float*) malloc(bcf_hdr_nsamples(vcfhdr) * 3 * sizeof(float));
+    int32_t *rrcount = (int*) malloc(bcf_hdr_nsamples(vcfhdr) * sizeof(int));
+    int32_t *rvcount = (int*) malloc(bcf_hdr_nsamples(vcfhdr) * sizeof(int));
+    int32_t *gqval = (int*) malloc(bcf_hdr_nsamples(vcfhdr) * sizeof(int));
+    std::vector<std::string> ftarr;
+    ftarr.resize(bcf_hdr_nsamples(vcfhdr));
     for (uint32_t i = 0; i < sv.size(); ++i) {
       // Lazy loading of reference genome
       if (sv[i].chr != lastIdx) {
 	if (seq != NULL) { free(seq); seq = NULL; }
 	int32_t seqlen = -1;
-	std::string chrom(bamhd->target_name[sv[i].chr]);
-	seq = faidx_fetch_seq(fai, chrom.c_str(), 0, bamhd->target_len[sv[i].chr], &seqlen);
+	std::string chrom(bamhd[0]->target_name[sv[i].chr]);
+	seq = faidx_fetch_seq(fai, chrom.c_str(), 0, bamhd[0]->target_len[sv[i].chr], &seqlen);
 	lastIdx = sv[i].chr;
       }
 
       // Insertion annotation
       InsAnno ianno;
-      annotateHomology(c, bamhd, fai, seq, searchseq, sv[i], ianno);
+      annotateHomology(c, bamhd[0], fai, seq, searchseq, sv[i], ianno);
       char strand = ianno.isRC ? '-' : '+';
 
       // Breakpoint insertion type
@@ -427,7 +450,7 @@ namespace breaktracer {
 
       // Build record
       bcf_clear(rec);
-      rec->rid = bcf_hdr_name2id(vcfhdr, bamhd->target_name[sv[i].chr]);
+      rec->rid = bcf_hdr_name2id(vcfhdr, bamhd[0]->target_name[sv[i].chr]);
       rec->pos = sv[i].pos;  // 0-based (htslib internal)
       bcf_update_id(vcfhdr, rec, id.c_str());
       std::string alleles(1, (char) std::toupper((unsigned char) seq[sv[i].pos]));
@@ -463,7 +486,7 @@ namespace breaktracer {
       } else {
 	tmpi = sv[i].pos + 1;   // 1-based
 	bcf_update_info_int32(vcfhdr, rec, "END", &tmpi, 1);
-	bcf_update_info_string(vcfhdr, rec, "CHR2", bamhd->target_name[sv[i].chr2]);
+	bcf_update_info_string(vcfhdr, rec, "CHR2", bamhd[0]->target_name[sv[i].chr2]);
 	tmpi = sv[i].pos2 + 1;  // 1-based VCF INFO/POS2
 	bcf_update_info_int32(vcfhdr, rec, "POS2", &tmpi, 1);
       }
@@ -512,15 +535,15 @@ namespace breaktracer {
       }
 
       // Genotype
-      {
+      int32_t qstart = sv[i].pos > 0 ? sv[i].pos - 1 : 0;
+      int32_t qend = sv[i].pos + 1;
+      for(uint32_t file_c = 0; file_c < c.files.size(); ++file_c) {
 	BoLog<double> bl;
 	std::vector<int32_t> mapqRef;
 	std::vector<int32_t> mapqAlt;
-	int32_t qstart = sv[i].pos > 0 ? sv[i].pos - 1 : 0;
-	int32_t qend = sv[i].pos + 1;
-	hts_itr_t* giter = sam_itr_queryi(idx, sv[i].chr, qstart, qend);
+	hts_itr_t* giter = sam_itr_queryi(idx[file_c], sv[i].chr, qstart, qend);
 	bam1_t* greg = bam_init1();
-	while (sam_itr_next(samfile, giter, greg) >= 0) {
+	while (sam_itr_next(samfile[file_c], giter, greg) >= 0) {
 	  if (greg->core.flag & (BAM_FUNMAP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FQCFAIL | BAM_FDUP)) continue;
 	  if (greg->core.qual < 1) continue;
 	  std::size_t seed = hash_lr(greg);
@@ -529,33 +552,44 @@ namespace breaktracer {
 	}
 	bam_destroy1(greg);
 	hts_itr_destroy(giter);
-
-	float gls[3] = {0, 0, 0};
-	int32_t gqval[1] = {0};
-	int32_t gts[2] = {bcf_gt_missing, bcf_gt_missing};
-	_computeGLs(bl, mapqRef, mapqAlt, gls, gqval, gts, 0);
-	bcf_update_genotypes(vcfhdr, rec, gts, 2);
-	bcf_update_format_float(vcfhdr, rec, "GL", gls, 3);
-	bcf_update_format_int32(vcfhdr, rec, "GQ", gqval, 1);
-	std::string ftstr = (gqval[0] < 15) ? "LowQual" : "PASS";
-	const char* ftp = ftstr.c_str();
-	bcf_update_format_string(vcfhdr, rec, "FT", &ftp, 1);
-	int32_t rrval = (int32_t) mapqRef.size();
-	int32_t rvval = (int32_t) mapqAlt.size();
-	bcf_update_format_int32(vcfhdr, rec, "RR", &rrval, 1);
-	bcf_update_format_int32(vcfhdr, rec, "RV", &rvval, 1);
+	// Compute GLs
+	_computeGLs(bl, mapqRef, mapqAlt, gls, gqval, gts, file_c);
+	if (gqval[file_c] < 15) ftarr[file_c] = "LowQual";
+	else ftarr[file_c] = "PASS";
+	rrcount[file_c] = (int32_t) mapqRef.size();
+	rvcount[file_c] = (int32_t) mapqAlt.size();
       }
+      bcf_update_genotypes(vcfhdr, rec, gts, bcf_hdr_nsamples(vcfhdr) * 2);
+      bcf_update_format_float(vcfhdr, rec, "GL", gls, bcf_hdr_nsamples(vcfhdr) * 3);
+      bcf_update_format_int32(vcfhdr, rec, "GQ", gqval, bcf_hdr_nsamples(vcfhdr));
+      std::vector<const char*> strp(bcf_hdr_nsamples(vcfhdr));
+      std::transform(ftarr.begin(), ftarr.end(), strp.begin(), cstyle_str());
+      bcf_update_format_string(vcfhdr, rec, "FT", &strp[0], bcf_hdr_nsamples(vcfhdr));
+      bcf_update_format_int32(vcfhdr, rec, "RR", rrcount, bcf_hdr_nsamples(vcfhdr));
+      bcf_update_format_int32(vcfhdr, rec, "RV", rvcount, bcf_hdr_nsamples(vcfhdr));
       // Write record
       bcf_write1(fp, vcfhdr, rec);
+      bcf_clear1(rec);
     }
     bcf_destroy(rec);
+
+    // Clean-up
+    free(gts);
+    free(gls);
+    free(rrcount);
+    free(rvcount);
+    free(gqval);
+
+    // Clean-up sequence
     if (seq != NULL) free(seq);
     fai_destroy(fai);
 
-    // Clean-up
-    bam_hdr_destroy(bamhd);
-    hts_idx_destroy(idx);
-    sam_close(samfile);
+    // Clean-up BAM and VCF structures
+    for(unsigned int file_c = 0; file_c < c.files.size(); ++file_c) {
+      bam_hdr_destroy(bamhd[file_c]);
+      hts_idx_destroy(idx[file_c]);
+      sam_close(samfile[file_c]);
+    }
     bcf_hdr_destroy(vcfhdr);
     hts_close(fp);
 
