@@ -27,11 +27,13 @@
 #include "junction.h"
 #include "cluster.h"
 #include "consensus.h"
+#include "genotype.h"
 
 namespace breaktracer {
 
 
   struct TracerConfig {
+    bool hasDumpFile;
     uint16_t hasGenomeMask;
     uint16_t insmode;
     uint16_t minMapQual;
@@ -47,6 +49,7 @@ namespace breaktracer {
     int32_t cropSize;
     float pctThres;
     float indelExtension;
+    boost::filesystem::path dumpfile;
     boost::filesystem::path outfile;
     std::vector<boost::filesystem::path> files;
     boost::filesystem::path genome;
@@ -226,7 +229,6 @@ namespace breaktracer {
       int32_t matchStart = 0;
       int32_t matchEnd = sv.consensus.size();
       EdlibAlignResult trRes = edlibAlign(meiSeq.c_str(), meiSeq.size(), sv.consensus.c_str(), sv.consensus.size(), edlibNewAlignConfig(-1, EDLIB_MODE_HW, EDLIB_TASK_PATH, NULL, 0));
-      //printAlignment(meiSeq, sv.consensus, EDLIB_MODE_HW, trRes);
       if ((trRes.status == EDLIB_STATUS_OK) && (trRes.numLocations > 0)) {
 	matchStart = trRes.startLocations[0];
 	matchEnd = trRes.endLocations[0];
@@ -298,9 +300,9 @@ namespace breaktracer {
     }
   };
   
-  template<typename TConfig>
+  template<typename TConfig, typename TJunctionCountMap>
   inline void
-  output(TConfig const& c, std::vector<BrInTrace>& sv) {
+  output(TConfig const& c, std::vector<BrInTrace>& sv, TJunctionCountMap& jctCountMap) {
     // Sort by chromosome
     std::sort(sv.begin(), sv.end());
 
@@ -539,25 +541,26 @@ namespace breaktracer {
       int32_t qend = sv[i].pos + 1;
       for(uint32_t file_c = 0; file_c < c.files.size(); ++file_c) {
 	BoLog<double> bl;
-	std::vector<int32_t> mapqRef;
-	std::vector<int32_t> mapqAlt;
-	hts_itr_t* giter = sam_itr_queryi(idx[file_c], sv[i].chr, qstart, qend);
-	bam1_t* greg = bam_init1();
-	while (sam_itr_next(samfile[file_c], giter, greg) >= 0) {
-	  if (greg->core.flag & (BAM_FUNMAP | BAM_FSECONDARY | BAM_FSUPPLEMENTARY | BAM_FQCFAIL | BAM_FDUP)) continue;
-	  if (greg->core.qual < 1) continue;
-	  std::size_t seed = hash_lr(greg);
-	  if (sv[i].seeds.count(seed)) mapqAlt.push_back(greg->core.qual);
-	  else mapqRef.push_back(greg->core.qual);
+	if (sv[i].consensus.empty()) {
+	  // No consensus --> split-read genotyping
+	  hts_itr_t* giter = sam_itr_queryi(idx[file_c], sv[i].chr, qstart, qend);
+	  bam1_t* greg = bam_init1();
+	  while (sam_itr_next(samfile[file_c], giter, greg) >= 0) {
+	    if (greg->core.flag & (BAM_FUNMAP | BAM_FQCFAIL | BAM_FDUP)) continue;
+	    if (greg->core.qual < 1) continue;
+	    std::size_t seed = hash_lr(greg);
+	    if (sv[i].seeds.count(seed)) jctCountMap[file_c][i].alt.push_back(greg->core.qual);
+	    else jctCountMap[file_c][i].ref.push_back(greg->core.qual);
+	  }
+	  bam_destroy1(greg);
+	  hts_itr_destroy(giter);
 	}
-	bam_destroy1(greg);
-	hts_itr_destroy(giter);
 	// Compute GLs
-	_computeGLs(bl, mapqRef, mapqAlt, gls, gqval, gts, file_c);
+	_computeGLs(bl, jctCountMap[file_c][i].ref, jctCountMap[file_c][i].alt, gls, gqval, gts, file_c);
 	if (gqval[file_c] < 15) ftarr[file_c] = "LowQual";
 	else ftarr[file_c] = "PASS";
-	rrcount[file_c] = (int32_t) mapqRef.size();
-	rvcount[file_c] = (int32_t) mapqAlt.size();
+	rrcount[file_c] = jctCountMap[file_c][i].ref.size();
+	rvcount[file_c] = jctCountMap[file_c][i].alt.size();
       }
       bcf_update_genotypes(vcfhdr, rec, gts, bcf_hdr_nsamples(vcfhdr) * 2);
       bcf_update_format_float(vcfhdr, rec, "GL", gls, bcf_hdr_nsamples(vcfhdr) * 3);
@@ -619,9 +622,15 @@ namespace breaktracer {
     
     // Assemble
     assemble(c, tr, sv);
+
+    // Genotype
+    typedef std::vector<JunctionCount> TSVJunctionMap;
+    typedef std::vector<TSVJunctionMap> TSampleSVJunctionMap;
+    TSampleSVJunctionMap jctMap(c.files.size());
+    genotype(c, sv, jctMap);
     
     // Output
-    output(c, sv);
+    output(c, sv, jctMap);
     
 #ifdef PROFILE
     ProfilerStop();
@@ -646,6 +655,7 @@ namespace breaktracer {
       ("technology,y", boost::program_options::value<std::string>(&mode)->default_value("ont"), "seq. technology [pb, ont]")
       ("genome,g", boost::program_options::value<boost::filesystem::path>(&c.genome), "genome fasta file")
       ("outfile,o", boost::program_options::value<boost::filesystem::path>(&c.outfile), "BCF output file")
+      ("dump,d", boost::program_options::value<boost::filesystem::path>(&c.dumpfile), "gzipped output file of insertion reads")
       ("threads,t", boost::program_options::value<uint32_t>(&c.maxThreads)->default_value(8), "number of threads")
       ;
     
@@ -693,6 +703,10 @@ namespace breaktracer {
       std::cerr << visible_options << "\n";
       return 0;
     }
+
+    // Dump reads
+    if (vm.count("dump")) c.hasDumpFile = true;
+    else c.hasDumpFile = false;
     
     // Clique size
     if (c.minCliqueSize < 2) c.minCliqueSize = 2;

@@ -109,7 +109,6 @@ namespace breaktracer {
 	  if ((cigarFull.status == EDLIB_STATUS_OK) && (cigarFull.editDistance != -1)) {
 	    double pIdFull = 1.0 - ( (double) (cigarFull.editDistance) / (double) (c.minSeedAlign) );
 	    if (pIdFull > c.pctThres) {
-	      //printAlignment(refseq, searchseq, EDLIB_MODE_HW, cigarFull);
 	      for(int32_t k = pos; k < pos + c.minSeedAlign; ++k) masked[k] = true;
 	      ++ahit;
 	    }
