@@ -469,7 +469,7 @@ namespace breaktracer {
       if (qvalout > 10000) qvalout = 10000;
       rec->qual = qvalout;
       int32_t fltPass = bcf_hdr_id2int(vcfhdr, BCF_DT_ID, "PASS");
-      if (qvalout < 60) { fltPass = bcf_hdr_id2int(vcfhdr, BCF_DT_ID, "LowQual"); }
+      if ((qvalout < 60) || (sv[i].consensus.empty())) { fltPass = bcf_hdr_id2int(vcfhdr, BCF_DT_ID, "LowQual"); }
       bcf_update_filter(vcfhdr, rec, &fltPass, 1);
 
       // INFO fields
