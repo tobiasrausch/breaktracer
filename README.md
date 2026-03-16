@@ -1,3 +1,8 @@
+[![C/C++ CI](https://github.com/tobiasrausch/breaktracer/workflows/C/C++%20CI/badge.svg)](https://github.com/tobiasrausch/breaktracer/actions)
+[![Docker CI](https://github.com/tobiasrausch/breaktracer/workflows/Docker%20CI/badge.svg)](https://hub.docker.com/r/trausch/breaktracer/)
+[![GitHub license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/tobiasrausch/breaktracer/blob/master/LICENSE)
+[![GitHub Releases](https://img.shields.io/github/release/tobiasrausch/breaktracer.svg)](https://github.com/tobiasrausch/breaktracer/releases)
+
 # BreakTracer: Tracing inserted sequence fragments at structural variant breakpoints using long-reads
 
 ## Installing breaktracer
