@@ -5,7 +5,9 @@
 
 # BreakTracer: Tracing inserted sequence fragments at structural variant breakpoints using long-reads
 
-## Installing breaktracer
+BreakTracer is designed to identify inserted sequence fragments at structural variant (SV) breakpoints using long-read sequencing data. It can detect mobile element insertions, viral sequence integrations, and internal tandem duplications (ITDs), such as FLT3-ITDs. In contrast to generic SV callers like [delly](https://github.com/dellytools/delly), BreakTracer can resolve complex SVs mediated by such insertions and link the inserted sequences to adjacent genomic rearrangements.
+
+## Installing BreakTracer
 
 BreakTracer is available as a [statically linked binary](https://github.com/tobiasrausch/breaktracer/releases/), as a minimal [docker container](https://hub.docker.com/r/trausch/breaktracer/) or as a [singularity containter (SIF file)](https://github.com/tobiasrausch/breaktracer/releases/). The static binaries you can simply download [here](https://github.com/tobiasrausch/breaktracer/releases/) and then make them executable, e.g.:
 
@@ -24,7 +26,7 @@ BreakTracer can be built from source using a recursive clone and make. BreakTrac
 
 `make all`
 
-## Running breaktracer
+## Running BreakTracer
 
 BreakTracer has been designed to identify inserted sequence fragments at structural variant (SV) breakpoints using long-read sequencing data. For instance, to identify L1 fragments at SV breakpoints:
 

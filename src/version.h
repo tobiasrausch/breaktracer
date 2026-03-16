@@ -5,7 +5,7 @@ namespace breaktracer
 {
 
 
-  std::string breaktracerVersionNumber = "0.1.3";
+  std::string breaktracerVersionNumber = "0.2.6";
 
   inline 
     void printTitle(std::string const& title) 
