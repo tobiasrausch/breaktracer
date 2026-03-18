@@ -66,6 +66,7 @@ namespace breaktracer
   inline void
   genotype(TConfig& c, std::vector<BrInTrace>& svs, TJunctionMap& jctMap) {
     if (svs.empty()) return;
+    std::string searchseq = builtSearchSeq(c);
 
     // Open file handles
     typedef std::vector<samFile*> TSamFile;
@@ -137,6 +138,8 @@ namespace breaktracer
 	    int32_t pos  = svs[svid].pos;
 	    if ((svs[svid].chr != refIndex) || (pos < rStart) || (pos > rEnd)) continue;
 	    if (svs[svid].consensus.empty()) continue;
+	    if (svs[svid].chr != svs[svid].chr2) continue;  // InterChromosomalSVwithInsertion
+	    if (std::abs(svs[svid].pos - svs[svid].pos2) > (searchseq.size() * 2 + svs[svid].consensus.size())) continue;  // IntraChromosomalSVwithInsertion
 
 	    // Load read sequence
 	    if (sequence.empty()) {

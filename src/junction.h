@@ -383,23 +383,7 @@ namespace breaktracer
   template<typename TConfig, typename TReadBp>
   inline void
   findBrIn(TConfig const& c, TReadBp& readBp, std::vector<TraceRecord>& tr) {
-    std::string searchseq;
-    if (c.insmode == 0) {
-      std::string faname = "";
-      if (!loadSingleFasta(c, faname, searchseq)) return;
-    } else {
-      if (c.insmode == 1) searchseq = MEI::alu;
-      else if (c.insmode == 3) searchseq = MEI::sva;
-      else if (c.insmode == 4) searchseq = MEI::numt; 
-      else searchseq = MEI::line1;
-      // Add poly-A for MEIs
-      if (c.insmode != 4) searchseq += MEI::polyA;
-    }
-
-    // Augment with reverse complement
-    std::string revseq = searchseq;
-    reverseComplement(revseq);
-    searchseq += revseq;
+    std::string searchseq = builtSearchSeq(c);
 
     // Open file handles
     typedef std::vector<samFile*> TSamFile;

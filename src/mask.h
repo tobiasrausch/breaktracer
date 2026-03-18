@@ -63,22 +63,7 @@ namespace breaktracer {
     int maxEdit = std::max((int) ((1.0 - c.pctThres) * c.minSeedAlign), 1);
     
     // Generate search probe
-    std::string searchseq;
-    if (c.insmode == 0) {
-      std::string faname = "";
-      if (!loadSingleFasta(c, faname, searchseq)) return 1;
-    } else {
-      if (c.insmode == 1) searchseq = MEI::alu;
-      else if (c.insmode == 3) searchseq = MEI::sva;
-      else if (c.insmode == 4) searchseq = MEI::numt;
-      else searchseq = MEI::line1;
-      // Add poly-A for MEIs
-      if (c.insmode != 4) searchseq += MEI::polyA;
-    }
-    // Augment with reverse complement
-    std::string revseq = searchseq;
-    reverseComplement(revseq);
-    searchseq += revseq;
+    std::string searchseq = builtSearchSeq(c);
 
     // Iterate chromosomes
     faidx_t* fai = fai_load(c.genome.string().c_str());

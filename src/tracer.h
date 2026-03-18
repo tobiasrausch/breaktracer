@@ -307,21 +307,7 @@ namespace breaktracer {
     std::sort(sv.begin(), sv.end());
 
     // Load insertion reference sequence
-    std::string searchseq;
-    if (c.insmode == 0) {
-      std::string faname = "";
-      if (!loadSingleFasta(c, faname, searchseq)) return;
-    } else {
-      if (c.insmode == 1) searchseq = MEI::alu;
-      else if (c.insmode == 3) searchseq = MEI::sva;
-      else if (c.insmode == 4) searchseq = MEI::numt;
-      else searchseq = MEI::line1;
-      if (c.insmode != 4) searchseq += MEI::polyA;
-    }
-    int32_t minComplexOffset = searchseq.size() * 2;
-    std::string revseq = searchseq;
-    reverseComplement(revseq);
-    searchseq += revseq;
+    std::string searchseq = builtSearchSeq(c);
 
     // ALT allele string based on insertion mode
     std::string altStr;
@@ -438,11 +424,9 @@ namespace breaktracer {
       char strand = ianno.isRC ? '-' : '+';
 
       // Breakpoint insertion type
-      int32_t offset = std::abs(sv[i].pos - sv[i].pos2);
-      offset -= (int32_t) sv[i].consensus.size();
       std::string brintype;
       if (sv[i].chr != sv[i].chr2) brintype = "InterChromosomalSVwithInsertion";
-      else if (offset > minComplexOffset) brintype = "IntraChromosomalSVwithInsertion";
+      else if (std::abs(sv[i].pos - sv[i].pos2) > (searchseq.size() * 2 + sv[i].consensus.size())) brintype = "IntraChromosomalSVwithInsertion";
       else brintype = "PlainInsertion";
 
       // ID
@@ -541,8 +525,8 @@ namespace breaktracer {
       int32_t qend = sv[i].pos + 1;
       for(uint32_t file_c = 0; file_c < c.files.size(); ++file_c) {
 	BoLog<double> bl;
-	if (sv[i].consensus.empty()) {
-	  // No consensus --> split-read genotyping
+	if ((sv[i].consensus.empty()) || ((jctCountMap[file_c][i].alt.empty()) && (jctCountMap[file_c][i].ref.empty()))) {
+	  // No consensus or complex insertion --> split-read genotyping
 	  hts_itr_t* giter = sam_itr_queryi(idx[file_c], sv[i].chr, qstart, qend);
 	  bam1_t* greg = bam_init1();
 	  while (sam_itr_next(samfile[file_c], giter, greg) >= 0) {

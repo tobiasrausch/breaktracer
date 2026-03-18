@@ -208,7 +208,7 @@ namespace breaktracer
   infixEnd(EdlibAlignResult const& cigar) {
     return cigar.endLocations[0];
   }
-  
+
   template<typename TConfig>
   inline void
   checkSampleNames(TConfig& c) {
@@ -314,6 +314,26 @@ namespace breaktracer
       default: break;
       }
     }
+  }
+
+  template<typename TConfig>
+  inline std::string
+  builtSearchSeq(TConfig& c) {
+    std::string searchseq;
+    if (c.insmode == 0) {
+      std::string faname = "";
+      if (!loadSingleFasta(c, faname, searchseq)) return "NA";
+    } else {
+      if (c.insmode == 1) searchseq = MEI::alu;
+      else if (c.insmode == 3) searchseq = MEI::sva;
+      else if (c.insmode == 4) searchseq = MEI::numt;
+      else searchseq = MEI::line1;
+      if (c.insmode != 4) searchseq += MEI::polyA;
+    }
+    std::string revseq = searchseq;
+    reverseComplement(revseq);
+    searchseq += revseq;
+    return searchseq;
   }
 
   inline void
