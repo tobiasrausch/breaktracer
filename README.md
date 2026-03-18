@@ -1,3 +1,5 @@
+[![install with bioconda](https://img.shields.io/badge/install%20with-bioconda-brightgreen.svg?style=flat-square)](http://bioconda.github.io/recipes/breaktracer/README.html)
+[![Anaconda-Server Badge](https://anaconda.org/bioconda/breaktracer/badges/downloads.svg)](https://anaconda.org/bioconda/breaktracer)
 [![C/C++ CI](https://github.com/tobiasrausch/breaktracer/workflows/C/C++%20CI/badge.svg)](https://github.com/tobiasrausch/breaktracer/actions)
 [![Docker CI](https://github.com/tobiasrausch/breaktracer/workflows/Docker%20CI/badge.svg)](https://hub.docker.com/r/trausch/breaktracer/)
 [![GitHub license](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/tobiasrausch/breaktracer/blob/master/LICENSE)
