@@ -11,11 +11,11 @@ BreakTracer is designed to identify inserted sequence fragments at structural va
 
 ## Installing BreakTracer
 
-BreakTracer is available as a [statically linked binary](https://github.com/tobiasrausch/breaktracer/releases/), as a minimal [docker container](https://hub.docker.com/r/trausch/breaktracer/) or as a [singularity containter (SIF file)](https://github.com/tobiasrausch/breaktracer/releases/). The static binaries you can simply download [here](https://github.com/tobiasrausch/breaktracer/releases/) and then make them executable, e.g.:
+BreakTracer is available as a [Bioconda package](https://anaconda.org/bioconda/breaktracer), as a pre-compiled [statically linked binary](https://github.com/tobiasrausch/breaktracer/releases/), as a minimal [docker container](https://hub.docker.com/r/trausch/breaktracer/) or as a [singularity containter (SIF file)](https://github.com/tobiasrausch/breaktracer/releases/). The static binaries you can simply download [here](https://github.com/tobiasrausch/breaktracer/releases/) and then make them executable, e.g.:
 
 ```
-chmod a+x breaktracer_v0.0.5_linux_x86_64bit
-./breaktracer_v0.0.5_linux_x86_64bit
+chmod a+x breaktracer_v0.2.6_linux_x86_64bit
+./breaktracer_v0.2.6_linux_x86_64bit
 ```
 
 ## Building from source
