@@ -61,6 +61,6 @@ clean:
 	rm -f $(TARGETS) $(TARGETS:=.o) ${SUBMODULES}
 
 distclean: clean
-	rm -f ${BUILT_PROGRAMS}
+	rm -rf ${BUILT_PROGRAMS} bin/
 
 .PHONY: clean distclean install all
