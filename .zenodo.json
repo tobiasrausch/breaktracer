@@ -7,7 +7,7 @@
 	}
     ],
     "title": "BreakTracer: Tracing inserted sequence fragments at structural variant breakpoints",
-    "upload_type": "Software",
+    "upload_type": "dataset",
     "description": "<a href=\"https://github.com/tobiasrausch/breaktracer\">BreakTracer</a> is designed to identify inserted sequence fragments at structural variant (SV) breakpoints using long-read sequencing data. It can detect mobile element insertions, viral sequence integrations, and internal tandem duplications (ITDs), such as FLT3-ITDs. In contrast to generic SV callers like <a href=\"https://github.com/dellytools/delly\">delly</a>, <a href=\"https://github.com/tobiasrausch/breaktracer\">BreakTracer</a> can resolve complex SVs mediated by such insertions and link the inserted sequences to adjacent genomic rearrangements.",
     "keywords": [
 	"structural-variation",
